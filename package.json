@@ -13,7 +13,7 @@
     "test": "tsx --test src/domain/engine.test.ts src/server/supabase.test.ts src/server/ingestion.test.ts src/server/rag.test.ts src/server/pastPaperIntelligence.test.ts src/server/quizAssessment.test.ts src/server/coreIntelligenceEngine.test.ts src/server/revisionPlanner.test.ts src/server/aiSdk.test.ts src/server/conversationMemory.test.ts"
   },
   "engines": {
-    "node": ">=22.0.0"
+    "node": "22.x"
   },
   "dependencies": {
     "@ai-sdk/groq": "^4.0.84",

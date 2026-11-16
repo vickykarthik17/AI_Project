@@ -38,77 +38,92 @@ export function getDatabasePath(): string {
   return path.resolve(process.cwd(), 'gapfinder.sqlite');
 }
 
+function wrapSqlite(db: any) {
+  return {
+    exec: (sql: string) => db.exec(sql),
+    prepare: (sql: string) => {
+      const stmt = db.prepare(sql);
+      return {
+        get: (...params: any[]) => stmt.get(...params),
+        all: (...params: any[]) => stmt.all(...params),
+        run: (...params: any[]) => stmt.run(...params),
+      };
+    },
+    transaction: <T extends (...args: any[]) => any>(fn: T): T => {
+      return ((...args: any[]) => {
+        db.exec('BEGIN IMMEDIATE');
+        try {
+          const res = fn(...args);
+          db.exec('COMMIT');
+          return res;
+        } catch (err) {
+          db.exec('ROLLBACK');
+          throw err;
+        }
+      }) as T;
+    },
+  };
+}
+
+function wrapBetterSqlite(db: any) {
+  return {
+    exec: (sql: string) => db.exec(sql),
+    prepare: (sql: string) => {
+      const stmt = db.prepare(sql);
+      return {
+        get: (...params: any[]) => stmt.get(...params),
+        all: (...params: any[]) => stmt.all(...params),
+        run: (...params: any[]) => stmt.run(...params),
+      };
+    },
+    transaction: <T extends (...args: any[]) => any>(fn: T): T => {
+      return db.transaction(fn);
+    },
+  };
+}
+
 function createDatabaseConnection(resolvedDbPath: string) {
   // 1. Try node:sqlite (native Node 22+ built-in, 100% stable across Windows, Linux, and Vercel)
   try {
     const { DatabaseSync } = require('node:sqlite');
     const db = new DatabaseSync(resolvedDbPath);
     try {
-      db.exec('PRAGMA journal_mode = WAL;');
-    } catch {
-      try {
-        db.exec('PRAGMA journal_mode = DELETE;');
-      } catch {}
-    }
-    try {
-      db.exec('PRAGMA busy_timeout = 5000;');
+      db.exec('PRAGMA journal_mode = DELETE;');
     } catch {}
-    return {
-      exec: (sql: string) => db.exec(sql),
-      prepare: (sql: string) => {
-        const stmt = db.prepare(sql);
-        return {
-          get: (...params: any[]) => stmt.get(...params),
-          all: (...params: any[]) => stmt.all(...params),
-          run: (...params: any[]) => stmt.run(...params),
-        };
-      },
-      transaction: <T extends (...args: any[]) => any>(fn: T): T => {
-        return ((...args: any[]) => {
-          db.exec('BEGIN IMMEDIATE');
-          try {
-            const res = fn(...args);
-            db.exec('COMMIT');
-            return res;
-          } catch (err) {
-            db.exec('ROLLBACK');
-            throw err;
-          }
-        }) as T;
-      },
-    };
+    try {
+      db.exec('PRAGMA busy_timeout = 3000;');
+    } catch {}
+    return wrapSqlite(db);
   } catch (err: any) {
-    console.warn('File database failed, attempting in-memory SQLite fallback:', err.message);
+    console.warn('node:sqlite file initialization note:', err.message);
   }
 
-  // 2. Fallback: In-memory DatabaseSync if filesystem path is inaccessible
+  // 2. Try better-sqlite3 with file path
+  try {
+    const Database = require('better-sqlite3');
+    const db = new Database(resolvedDbPath, { timeout: 3000 });
+    try {
+      db.pragma('journal_mode = DELETE');
+    } catch {}
+    return wrapBetterSqlite(db);
+  } catch (err: any) {
+    console.warn('better-sqlite3 file initialization note:', err.message);
+  }
+
+  // 3. Fallback: In-memory node:sqlite DatabaseSync
   try {
     const { DatabaseSync } = require('node:sqlite');
     const memDb = new DatabaseSync(':memory:');
-    return {
-      exec: (sql: string) => memDb.exec(sql),
-      prepare: (sql: string) => {
-        const stmt = memDb.prepare(sql);
-        return {
-          get: (...params: any[]) => stmt.get(...params),
-          all: (...params: any[]) => stmt.all(...params),
-          run: (...params: any[]) => stmt.run(...params),
-        };
-      },
-      transaction: <T extends (...args: any[]) => any>(fn: T): T => {
-        return ((...args: any[]) => {
-          memDb.exec('BEGIN IMMEDIATE');
-          try {
-            const res = fn(...args);
-            memDb.exec('COMMIT');
-            return res;
-          } catch (err) {
-            memDb.exec('ROLLBACK');
-            throw err;
-          }
-        }) as T;
-      },
-    };
+    return wrapSqlite(memDb);
+  } catch (err: any) {
+    console.warn('node:sqlite in-memory initialization note:', err.message);
+  }
+
+  // 4. Fallback: In-memory better-sqlite3 Database
+  try {
+    const Database = require('better-sqlite3');
+    const memDb = new Database(':memory:');
+    return wrapBetterSqlite(memDb);
   } catch (finalErr: any) {
     console.error('All SQLite initialization attempts failed:', finalErr.message);
     throw finalErr;

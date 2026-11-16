@@ -18,6 +18,7 @@ import {
   sanitizeDashes,
 } from './src/domain/engine';
 import { dbRepo, initDatabase, seedDemoAccountIfNeeded, verifyPassword } from './src/server/db';
+import { DEMO_USER_ID } from './src/domain/seedData';
 import { repo } from './src/server/repository';
 import { ingestionService } from './src/server/ingestionService';
 import { ragRetrievalService } from './src/server/ragRetrievalService';
@@ -54,11 +55,6 @@ import {
 } from './src/types';
 
 initDatabase();
-if (isSupabaseConfigured()) {
-  seedSupabaseDemoAccount(false).catch((err) => {
-    console.warn('Notice: Background Supabase demo account check:', err.message);
-  });
-}
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -167,15 +163,38 @@ export async function createExpressApp() {
     }
   }
 
-  // Handle both standard Express bodies and Vercel serverless pre-parsed JSON bodies
+  // Non-blocking body parser for both standard Express and Vercel serverless environments
   app.use((req: Request, res: Response, next: NextFunction) => {
+    // 1. If body is already parsed by Vercel or upstream
     if (req.body && typeof req.body === 'object') {
       return next();
     }
+
+    // 2. If body is a string or Buffer, parse directly without waiting on stream
+    if (typeof req.body === 'string' && req.body.length > 0) {
+      try {
+        req.body = JSON.parse(req.body);
+        return next();
+      } catch {}
+    }
+    if (Buffer.isBuffer(req.body)) {
+      try {
+        req.body = JSON.parse(req.body.toString('utf-8'));
+        return next();
+      } catch {}
+    }
+
+    // 3. If stream has already ended or been consumed by Vercel Node runtime
+    if (req.readableEnded || (req as any)._readableState?.ended || (req as any).complete) {
+      req.body = req.body || {};
+      return next();
+    }
+
+    // 4. Safe streaming body parsing for standard Node server
     express.json({ limit: '15mb' })(req, res, next);
   });
 
-  // Dynamic Auth Middleware (Supabase JWT with SQLite fallback)
+  // Dynamic Auth Middleware (Instant Local Sessions + Supabase JWT verification)
   const requireAuth = async (req: AuthedRequest, res: Response, next: NextFunction) => {
     const authHeader = req.headers.authorization;
     const token = authHeader?.startsWith('Bearer ')
@@ -187,9 +206,25 @@ export async function createExpressApp() {
       return;
     }
 
-    if (isSupabaseConfigured()) {
+    // Instant local session lookup for SQLite tokens (< 1ms)
+    if (token.startsWith('gf_sess_') || token.startsWith('gf_demo_')) {
+      const user = dbRepo.getUserByToken(token);
+      if (user) {
+        req.user = user;
+        req.token = token;
+        return next();
+      }
+      res.status(401).json({ error: 'Session expired or invalid. Please sign in again.' });
+      return;
+    }
+
+    // Supabase JWT verification (only if token is a standard JWT with signature)
+    if (isSupabaseConfigured() && token.includes('.')) {
       try {
-        const user = await supabaseAuthService.getUser(token);
+        const user = await Promise.race([
+          supabaseAuthService.getUser(token),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 3000)),
+        ]);
         if (user) {
           req.user = user;
           req.token = token;
@@ -257,27 +292,70 @@ export async function createExpressApp() {
       }
 
       const cleanEmail = String(email).trim().toLowerCase();
+      const rawPassword = String(password);
 
+      // Instant 1-click Demo Account bypass (< 5ms response time)
+      if (cleanEmail === 'demo@gapfinder.ai' && rawPassword === 'Demo@123') {
+        let userRecord = dbRepo.getUserByEmail(cleanEmail);
+        if (!userRecord) {
+          try {
+            seedDemoAccountIfNeeded(true);
+            userRecord = dbRepo.getUserByEmail(cleanEmail);
+          } catch {}
+        }
+        const user: User = userRecord
+          ? {
+              id: userRecord.id,
+              name: userRecord.name,
+              email: userRecord.email,
+              targetExam: userRecord.targetExam,
+              examDate: userRecord.examDate,
+              dailyHours: userRecord.dailyHours,
+              isDemo: true,
+              createdAt: userRecord.createdAt,
+            }
+          : {
+              id: DEMO_USER_ID,
+              name: 'Aarav Sharma (Demo Student)',
+              email: 'demo@gapfinder.ai',
+              targetExam: 'National Advanced Biology Examination',
+              examDate: '2026-11-18',
+              dailyHours: 2.0,
+              isDemo: true,
+              createdAt: '2026-11-05T09:00:00.000Z',
+            };
+
+        const token = dbRepo.createSession(user.id);
+
+        // Non-blocking background sync with Supabase if configured
+        if (isSupabaseConfigured()) {
+          seedSupabaseDemoAccount(false).catch((e) => {
+            console.warn('Background Supabase demo seed note:', e.message);
+          });
+        }
+
+        res.json({ token, user });
+        return;
+      }
+
+      // Custom account login with Supabase timeout protection
       if (isSupabaseConfigured()) {
         try {
-          const result = await supabaseAuthService.login(cleanEmail, String(password));
+          const result = await Promise.race([
+            supabaseAuthService.login(cleanEmail, rawPassword),
+            new Promise<never>((_, reject) =>
+              setTimeout(() => reject(new Error('Supabase login timed out')), 4000)
+            ),
+          ]);
           res.json(result);
           return;
         } catch (supaErr: any) {
-          // If Supabase fails, continue to local store fallback
-          console.warn('Supabase login error, attempting local fallback:', supaErr.message);
+          console.warn('Supabase login warning, attempting local fallback:', supaErr.message);
         }
       }
 
       let userRecord = dbRepo.getUserByEmail(cleanEmail);
-      if (!userRecord && cleanEmail === 'demo@gapfinder.ai') {
-        try {
-          seedDemoAccountIfNeeded(true);
-          userRecord = dbRepo.getUserByEmail(cleanEmail);
-        } catch {}
-      }
-
-      if (!userRecord || !verifyPassword(String(password), userRecord.passwordHash)) {
+      if (!userRecord || !verifyPassword(rawPassword, userRecord.passwordHash)) {
         res.status(401).json({ error: 'Invalid email or password.' });
         return;
       }
@@ -1440,6 +1518,13 @@ export async function startServer() {
   return app;
 }
 
-if (!process.env.VERCEL) {
+// Only start standalone HTTP server when executed directly as entrypoint (e.g. npm start / npm run dev)
+const isDirectExecution =
+  process.argv[1] &&
+  (process.argv[1].endsWith('server.ts') || process.argv[1].endsWith('server.js')) &&
+  !process.env.VERCEL &&
+  !process.env.AWS_LAMBDA_FUNCTION_NAME;
+
+if (isDirectExecution) {
   startServer();
 }
