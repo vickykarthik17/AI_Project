@@ -152,11 +152,28 @@ async function recalculateUserGapDiagnoses(
   return updatedDiagnoses;
 }
 
+let dbInitialized = false;
+
 export async function createExpressApp() {
   const app = express();
   const PORT = Number(process.env.PORT) || 3000;
 
-  app.use(express.json({ limit: '15mb' }));
+  if (!dbInitialized) {
+    try {
+      initDatabase();
+      dbInitialized = true;
+    } catch (e: any) {
+      console.warn('Database initialization note:', e.message);
+    }
+  }
+
+  // Handle both standard Express bodies and Vercel serverless pre-parsed JSON bodies
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    if (req.body && typeof req.body === 'object') {
+      return next();
+    }
+    express.json({ limit: '15mb' })(req, res, next);
+  });
 
   // Dynamic Auth Middleware (Supabase JWT with SQLite fallback)
   const requireAuth = async (req: AuthedRequest, res: Response, next: NextFunction) => {
@@ -239,13 +256,27 @@ export async function createExpressApp() {
         return;
       }
 
+      const cleanEmail = String(email).trim().toLowerCase();
+
       if (isSupabaseConfigured()) {
-        const result = await supabaseAuthService.login(String(email), String(password));
-        res.json(result);
-        return;
+        try {
+          const result = await supabaseAuthService.login(cleanEmail, String(password));
+          res.json(result);
+          return;
+        } catch (supaErr: any) {
+          // If Supabase fails, continue to local store fallback
+          console.warn('Supabase login error, attempting local fallback:', supaErr.message);
+        }
       }
 
-      const userRecord = dbRepo.getUserByEmail(String(email));
+      let userRecord = dbRepo.getUserByEmail(cleanEmail);
+      if (!userRecord && cleanEmail === 'demo@gapfinder.ai') {
+        try {
+          seedDemoAccountIfNeeded(true);
+          userRecord = dbRepo.getUserByEmail(cleanEmail);
+        } catch {}
+      }
+
       if (!userRecord || !verifyPassword(String(password), userRecord.passwordHash)) {
         res.status(401).json({ error: 'Invalid email or password.' });
         return;
@@ -255,6 +286,7 @@ export async function createExpressApp() {
       const token = dbRepo.createSession(user.id);
       res.json({ token, user });
     } catch (err: any) {
+      console.error('Login route error:', err);
       res.status(500).json({ error: err.message || 'Login failed.' });
     }
   });

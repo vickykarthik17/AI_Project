@@ -1,13 +1,20 @@
 import React, { useState } from 'react';
 import {
+  Activity,
   ArrowRight,
   BookOpenCheck,
   Brain,
+  Calendar,
   CheckCircle2,
+  FileUp,
   HelpCircle,
+  Layers,
   Lock,
   Mail,
+  RefreshCw,
+  RotateCcw,
   Sparkles,
+  TrendingUp,
   User as UserIcon,
 } from 'lucide-react';
 import { apiRequest, setStoredToken } from '../api';
@@ -153,41 +160,132 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated }) => {
             </p>
           </div>
 
-          {/* Central Workflow Loop */}
-          <div id="workflow" className="rounded-xl border border-slate-200 bg-white p-5">
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-xs font-bold text-slate-900">
-                Closed-Loop Diagnostic Workflow
-              </span>
+          {/* Central Workflow Loop: Spacious, Elegant, Closed-Loop Grid */}
+          <div id="workflow" className="rounded-xl border border-slate-200 bg-white p-6 shadow-xs space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2.5">
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600">
+                  <RotateCcw className="h-4 w-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">
+                    Closed-Loop Diagnostic Workflow
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Continuous 7-phase learning cycle that pinpoints gaps and adapts as you improve
+                  </p>
+                </div>
+              </div>
               <button
                 type="button"
                 onClick={() => setShowHowItWorks(true)}
-                className="inline-flex items-center gap-1 text-xs font-semibold text-indigo-600 hover:text-indigo-800"
+                className="inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-600 hover:text-indigo-800 bg-indigo-50/80 hover:bg-indigo-100 px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
               >
                 <HelpCircle className="h-3.5 w-3.5" />
-                How GapFinder AI Works
+                <span>How GapFinder AI Works</span>
               </button>
             </div>
-            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2 text-center">
+
+            {/* Workflow Steps: Spacious 2-row / responsive grid */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3.5">
               {[
-                { step: '1. UPLOAD', desc: 'Syllabus & PDFs' },
-                { step: '2. ANALYZE', desc: 'Topic Map & RAG' },
-                { step: '3. TEST', desc: 'Grounded Quiz' },
-                { step: '4. DIAGNOSE', desc: 'Gap Detection' },
-                { step: '5. PLAN', desc: 'Daily Schedule' },
-                { step: '6. RE-TEST', desc: 'Verify Mastery' },
-                { step: '7. IMPROVE', desc: 'Track Delta' },
-              ].map((item) => (
-                <div
-                  key={item.step}
-                  className="rounded-lg bg-slate-50 p-2.5 border border-slate-200/80"
-                >
-                  <div className="text-[11px] font-bold text-indigo-950 font-mono whitespace-nowrap">
-                    {item.step}
+                {
+                  step: '01',
+                  title: 'Upload Material',
+                  desc: 'Syllabus, textbook chapters & past examination papers (.pdf, .txt).',
+                  icon: FileUp,
+                  badge: 'Source Input',
+                },
+                {
+                  step: '02',
+                  title: 'Curriculum & RAG',
+                  desc: 'Extracts syllabus topics and generates 64-dim Gemini vector chunks.',
+                  icon: Layers,
+                  badge: 'pgvector RAG',
+                },
+                {
+                  step: '03',
+                  title: 'Diagnostic Quiz',
+                  desc: 'Timed assessment (MCQ, True/False, Fill in Blank, Short Answer).',
+                  icon: HelpCircle,
+                  badge: 'Assessment',
+                },
+                {
+                  step: '04',
+                  title: 'Gap Diagnosis',
+                  desc: 'Deterministic classification into Weak, Medium, or Strong mastery.',
+                  icon: Activity,
+                  badge: 'Deterministic',
+                },
+                {
+                  step: '05',
+                  title: 'Revision Plan',
+                  desc: 'Daily study activities prioritized by exam frequency and severity.',
+                  icon: Calendar,
+                  badge: 'Planner',
+                },
+                {
+                  step: '06',
+                  title: 'Targeted Re-Test',
+                  desc: 'Re-assesses diagnosed misconceptions to verify genuine mastery.',
+                  icon: RefreshCw,
+                  badge: 'Verification',
+                },
+                {
+                  step: '07',
+                  title: 'Mastery Delta',
+                  desc: 'Tracks accuracy delta and shifts study time to remaining gaps.',
+                  icon: TrendingUp,
+                  badge: 'Progression',
+                },
+              ].map((item) => {
+                const Icon = item.icon;
+                return (
+                  <div
+                    key={item.step}
+                    className="rounded-xl border border-slate-200/90 bg-slate-50/60 p-4 flex flex-col justify-between hover:bg-white hover:border-indigo-300 hover:shadow-xs transition-all"
+                  >
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="flex h-6 w-6 items-center justify-center rounded-md bg-white border border-slate-200 text-xs font-mono font-bold text-indigo-700 shadow-2xs">
+                          {item.step}
+                        </span>
+                        <span className="text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-100/80">
+                          {item.badge}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2 text-xs font-bold text-slate-900 mt-1">
+                        <Icon className="h-4 w-4 text-indigo-600 shrink-0" />
+                        <span>{item.title}</span>
+                      </div>
+                      <p className="text-[11px] text-slate-600 mt-2 leading-relaxed">
+                        {item.desc}
+                      </p>
+                    </div>
                   </div>
-                  <div className="text-[11px] text-slate-500 mt-0.5 whitespace-nowrap">{item.desc}</div>
+                );
+              })}
+
+              {/* Step 8 / Feedback loop connector */}
+              <div className="rounded-xl border border-dashed border-indigo-300 bg-indigo-50/50 p-4 flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="flex h-6 w-6 items-center justify-center rounded-md bg-indigo-600 text-white text-xs font-mono font-bold">
+                      ↻
+                    </span>
+                    <span className="text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">
+                      Closed Loop
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 text-xs font-bold text-indigo-950 mt-1">
+                    <RotateCcw className="h-4 w-4 text-indigo-600 shrink-0" />
+                    <span>Closed-Loop Feedback</span>
+                  </div>
+                  <p className="text-[11px] text-indigo-900/80 mt-2 leading-relaxed">
+                    Higher test scores dynamically reduce revision priority and reallocate hours to remaining weak topics.
+                  </p>
                 </div>
-              ))}
+              </div>
             </div>
           </div>
 

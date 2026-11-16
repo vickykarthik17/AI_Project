@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
+import os from 'node:os';
 import path from 'node:path';
 import {
   ChatMessage,
@@ -30,54 +31,91 @@ import { sanitizeDashes } from '../domain/engine';
 
 const require = createRequire(import.meta.url);
 
-function createDatabaseConnection(resolvedDbPath: string) {
-  const nativeBinaryPath = path.resolve(
-    process.cwd(),
-    'node_modules/better-sqlite3/build/Release/better_sqlite3.node'
-  );
-  if (fs.existsSync(nativeBinaryPath)) {
-    try {
-      const BetterSqlite = require('better-sqlite3');
-      const db = new BetterSqlite(resolvedDbPath);
-      db.pragma('journal_mode = WAL');
-      db.pragma('busy_timeout = 5000');
-      return db;
-    } catch {
-      // Fall through to node:sqlite
-    }
+export function getDatabasePath(): string {
+  if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.NODE_ENV === 'production') {
+    return path.join(os.tmpdir(), 'gapfinder.sqlite');
   }
-
-  const { DatabaseSync } = require('node:sqlite');
-  const db = new DatabaseSync(resolvedDbPath);
-  db.exec('PRAGMA journal_mode = WAL;');
-  db.exec('PRAGMA busy_timeout = 5000;');
-  return {
-    exec: (sql: string) => db.exec(sql),
-    prepare: (sql: string) => {
-      const stmt = db.prepare(sql);
-      return {
-        get: (...params: any[]) => stmt.get(...params),
-        all: (...params: any[]) => stmt.all(...params),
-        run: (...params: any[]) => stmt.run(...params),
-      };
-    },
-    transaction: <T extends (...args: any[]) => any>(fn: T): T => {
-      return ((...args: any[]) => {
-        db.exec('BEGIN IMMEDIATE');
-        try {
-          const res = fn(...args);
-          db.exec('COMMIT');
-          return res;
-        } catch (err) {
-          db.exec('ROLLBACK');
-          throw err;
-        }
-      }) as T;
-    },
-  };
+  return path.resolve(process.cwd(), 'gapfinder.sqlite');
 }
 
-const dbPath = path.resolve(process.cwd(), 'gapfinder.sqlite');
+function createDatabaseConnection(resolvedDbPath: string) {
+  // 1. Try node:sqlite (native Node 22+ built-in, 100% stable across Windows, Linux, and Vercel)
+  try {
+    const { DatabaseSync } = require('node:sqlite');
+    const db = new DatabaseSync(resolvedDbPath);
+    try {
+      db.exec('PRAGMA journal_mode = WAL;');
+    } catch {
+      try {
+        db.exec('PRAGMA journal_mode = DELETE;');
+      } catch {}
+    }
+    try {
+      db.exec('PRAGMA busy_timeout = 5000;');
+    } catch {}
+    return {
+      exec: (sql: string) => db.exec(sql),
+      prepare: (sql: string) => {
+        const stmt = db.prepare(sql);
+        return {
+          get: (...params: any[]) => stmt.get(...params),
+          all: (...params: any[]) => stmt.all(...params),
+          run: (...params: any[]) => stmt.run(...params),
+        };
+      },
+      transaction: <T extends (...args: any[]) => any>(fn: T): T => {
+        return ((...args: any[]) => {
+          db.exec('BEGIN IMMEDIATE');
+          try {
+            const res = fn(...args);
+            db.exec('COMMIT');
+            return res;
+          } catch (err) {
+            db.exec('ROLLBACK');
+            throw err;
+          }
+        }) as T;
+      },
+    };
+  } catch (err: any) {
+    console.warn('File database failed, attempting in-memory SQLite fallback:', err.message);
+  }
+
+  // 2. Fallback: In-memory DatabaseSync if filesystem path is inaccessible
+  try {
+    const { DatabaseSync } = require('node:sqlite');
+    const memDb = new DatabaseSync(':memory:');
+    return {
+      exec: (sql: string) => memDb.exec(sql),
+      prepare: (sql: string) => {
+        const stmt = memDb.prepare(sql);
+        return {
+          get: (...params: any[]) => stmt.get(...params),
+          all: (...params: any[]) => stmt.all(...params),
+          run: (...params: any[]) => stmt.run(...params),
+        };
+      },
+      transaction: <T extends (...args: any[]) => any>(fn: T): T => {
+        return ((...args: any[]) => {
+          memDb.exec('BEGIN IMMEDIATE');
+          try {
+            const res = fn(...args);
+            memDb.exec('COMMIT');
+            return res;
+          } catch (err) {
+            memDb.exec('ROLLBACK');
+            throw err;
+          }
+        }) as T;
+      },
+    };
+  } catch (finalErr: any) {
+    console.error('All SQLite initialization attempts failed:', finalErr.message);
+    throw finalErr;
+  }
+}
+
+const dbPath = getDatabasePath();
 const sqlite = createDatabaseConnection(dbPath);
 
 export function hashPassword(password: string, salt?: string): string {
