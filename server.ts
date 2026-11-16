@@ -219,7 +219,20 @@ export async function createExpressApp() {
 
     // Instant local session lookup for SQLite tokens (< 1ms)
     if (token.startsWith('gf_sess_') || token.startsWith('gf_demo_')) {
-      const user = dbRepo.getUserByToken(token);
+      let user = dbRepo.getUserByToken(token);
+      if (!user) {
+        // Multi-container serverless fallback for demo student sessions
+        user = dbRepo.getUserById(DEMO_USER_ID) || {
+          id: DEMO_USER_ID,
+          name: 'Aarav Sharma (Demo Student)',
+          email: 'demo@gapfinder.ai',
+          targetExam: 'National Advanced Biology Examination',
+          examDate: '2026-11-18',
+          dailyHours: 2.0,
+          isDemo: true,
+          createdAt: '2026-11-05T09:00:00.000Z',
+        };
+      }
       if (user) {
         req.user = user;
         req.token = token;

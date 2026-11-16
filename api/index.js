@@ -7937,7 +7937,19 @@ async function createExpressApp() {
       return;
     }
     if (token.startsWith("gf_sess_") || token.startsWith("gf_demo_")) {
-      const user2 = dbRepo.getUserByToken(token);
+      let user2 = dbRepo.getUserByToken(token);
+      if (!user2) {
+        user2 = dbRepo.getUserById(DEMO_USER_ID) || {
+          id: DEMO_USER_ID,
+          name: "Aarav Sharma (Demo Student)",
+          email: "demo@gapfinder.ai",
+          targetExam: "National Advanced Biology Examination",
+          examDate: "2026-11-18",
+          dailyHours: 2,
+          isDemo: true,
+          createdAt: "2026-11-05T09:00:00.000Z"
+        };
+      }
       if (user2) {
         req.user = user2;
         req.token = token;
