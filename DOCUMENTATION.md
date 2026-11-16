@@ -268,3 +268,4 @@ To deploy:
 - **Reliability**: Deterministic math handles classifications and objective grades, eliminating AI hallucination.
 - **Adaptability**: Revision plans automatically adjust as students learn and improve.
 - **Grounding**: All questions, citations, and assistant answers link directly back to verified study materials.
+
