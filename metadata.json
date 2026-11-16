@@ -1,0 +1,6 @@
+{
+  "name": "GapFinder AI",
+  "description": "Intelligent learning diagnosis platform that identifies student knowledge gaps through RAG-grounded assessments and generates adaptive revision plans with Groq.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
