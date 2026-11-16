@@ -132,14 +132,26 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     );
   }
 
-  const {
-    overview,
-    diagnoses,
-    incompleteTasks,
-    recentQuizzes,
-    improvementComparison,
-    recommendedNextStep,
-  } = data;
+  const overview = data.overview || (data as any).summary || {
+    totalSubjects: 1,
+    topicsAssessed: 0,
+    totalTopics: 0,
+    weakCount: 0,
+    mediumCount: 0,
+    strongCount: 0,
+    insufficientCount: 0,
+    avgDiagnosticScore: 0,
+    studyHoursCompleted: 0,
+  };
+  const diagnoses = data.diagnoses || (data as any).gapDiagnoses || [];
+  const incompleteTasks = data.incompleteTasks || (data as any).upcomingTasks || [];
+  const recentQuizzes = data.recentQuizzes || (data as any).quizzes || [];
+  const improvementComparison = data.improvementComparison || (data as any).scoreComparison || {
+    previousAttempt: null,
+    latestAttempt: null,
+    deltaPercent: 0,
+  };
+  const recommendedNextStep = data.recommendedNextStep || null;
 
   const statusColor = (status: string) => {
     if (status === 'Weak') return '#DC2626';
@@ -148,7 +160,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     return '#64748B';
   };
 
-  const attemptChartData = [...recentQuizzes]
+  const attemptChartData = [...(recentQuizzes || [])]
     .reverse()
     .map((q, idx) => ({
       name: `Attempt ${idx + 1}`,

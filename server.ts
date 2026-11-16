@@ -1420,18 +1420,57 @@ export async function createExpressApp() {
           action: 'Start a 5-question diagnostic quiz.',
         };
 
+    const topWeakTopics = diagnoses.filter((d) => d.status === 'Weak').slice(0, 5);
+
+    const improvementComparison = {
+      previousAttempt: previousAttempt
+        ? {
+            id: previousAttempt.id,
+            title: previousAttempt.title,
+            accuracyPercent: previousAttempt.accuracyPercent,
+            completedAt: previousAttempt.completedAt,
+          }
+        : null,
+      latestAttempt: latestAttempt
+        ? {
+            id: latestAttempt.id,
+            title: latestAttempt.title,
+            accuracyPercent: latestAttempt.accuracyPercent,
+            completedAt: latestAttempt.completedAt,
+          }
+        : null,
+      deltaPercent:
+        previousAttempt && latestAttempt
+          ? latestAttempt.accuracyPercent - previousAttempt.accuracyPercent
+          : 0,
+    };
+
+    const overview = {
+      totalSubjects: subjects.length || 1,
+      topicsAssessed: diagnoses.filter((d) => d.questionsAttempted > 0).length,
+      totalTopics: topics.length,
+      weakCount: weakTopics.length,
+      mediumCount: mediumTopics.length,
+      strongCount: strongTopics.length,
+      insufficientCount: insufficientTopics.length,
+      avgDiagnosticScore,
+      studyHoursCompleted,
+    };
+
     res.json({
+      overview,
+      diagnoses,
+      topWeakTopics,
+      incompleteTasks,
+      recentQuizzes: quizzes,
+      improvementComparison,
+      recommendedNextStep,
+
+      // Backward compatible aliases
       summary: {
-        totalSubjects: subjects.length || 1,
+        ...overview,
         materialsCount: materials.length,
-        totalTopics: topics.length,
         diagnosticQuizzesTaken: quizzes.length,
-        avgDiagnosticScore,
-        studyHoursCompleted,
-        weakCount: weakTopics.length,
-        mediumCount: mediumTopics.length,
-        strongCount: strongTopics.length,
-        insufficientCount: insufficientTopics.length,
       },
       gapDiagnoses: diagnoses,
       activeRevisionPlan: activePlan,
@@ -1440,12 +1479,8 @@ export async function createExpressApp() {
       scoreComparison: {
         previousAccuracy: previousAttempt?.accuracyPercent ?? null,
         latestAccuracy: latestAttempt?.accuracyPercent ?? null,
-        deltaPercent:
-          previousAttempt && latestAttempt
-            ? latestAttempt.accuracyPercent - previousAttempt.accuracyPercent
-            : 0,
+        deltaPercent: improvementComparison.deltaPercent,
       },
-      recommendedNextStep,
     });
   });
 

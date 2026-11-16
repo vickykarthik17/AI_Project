@@ -19,6 +19,7 @@ import { apiRequest, getStoredToken, setStoredToken } from './api';
 import { AuthScreen } from './components/AuthScreen';
 import { CitationModal } from './components/CitationModal';
 import { DashboardView } from './components/DashboardView';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { GapAnalysisView } from './components/GapAnalysisView';
 import { HowItWorksModal } from './components/HowItWorksModal';
 import { MaterialsView } from './components/MaterialsView';
@@ -294,7 +295,8 @@ export default function App() {
         </header>
 
         <main className="flex-1 p-6 max-w-7xl w-full mx-auto">
-          {activeTab === 'dashboard' && (
+          <ErrorBoundary>
+            {activeTab === 'dashboard' && (
             <DashboardView
               onNavigate={handleNavigate}
               onInspectCitation={(c) => setInspectedCitation(c)}
@@ -341,6 +343,7 @@ export default function App() {
               onOpenHowItWorks={() => setShowHowItWorks(true)}
             />
           )}
+          </ErrorBoundary>
         </main>
       </div>
 

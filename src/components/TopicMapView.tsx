@@ -283,7 +283,7 @@ export const TopicMapView: React.FC = () => {
   const questionsNeedingReview = pastQuestions.filter((q) => q.needsReview);
 
   // Frequency Chart Data from Intelligence or Topics
-  const freqChartData = [...topics]
+  const freqChartData = [...(topics || [])]
     .sort((a, b) => b.pastPaperFrequency - a.pastPaperFrequency)
     .map((t) => ({
       topicName: t.topicName,
