@@ -1,8 +1,27 @@
-import { createExpressApp } from '../server';
-
 let cachedApp: any = null;
 
+async function getApp() {
+  if (!cachedApp) {
+    const { createExpressApp } = await import('../server');
+    cachedApp = await createExpressApp();
+  }
+  return cachedApp;
+}
+
 export default async function handler(req: any, res: any) {
+  // 0. Instant health and diagnostics endpoint (< 1ms, zero cold boot delay)
+  const pathname = (req.url || '').split('?')[0];
+  if (pathname === '/api/health' || pathname === '/health') {
+    res.status(200).json({
+      status: 'ok',
+      node: process.version,
+      platform: process.platform,
+      arch: process.arch,
+      timestamp: new Date().toISOString(),
+    });
+    return;
+  }
+
   // 1. Restore actual request path if invoked via Vercel rewrite
   const matchedPath =
     req.headers['x-matched-path'] ||
@@ -23,16 +42,28 @@ export default async function handler(req: any, res: any) {
     } catch {}
   }
 
-  // 3. Lazy initialize Express app
-  if (!cachedApp) {
-    cachedApp = await createExpressApp();
+  // 3. Lazy initialize Express application with error containment
+  let app: any;
+  try {
+    app = await getApp();
+  } catch (initErr: any) {
+    console.error('Fatal initialization error:', initErr);
+    if (!res.headersSent) {
+      res.status(500).json({
+        error: 'Initialization failed',
+        message: initErr?.message || String(initErr),
+        stack: initErr?.stack,
+        nodeVersion: process.version,
+      });
+    }
+    return;
   }
 
   // 4. Dispatch request to Express with finish/close guarantee
   return new Promise((resolve) => {
     res.on('finish', resolve);
     res.on('close', resolve);
-    cachedApp(req, res, (err: any) => {
+    app(req, res, (err: any) => {
       if (err) {
         console.error('Unhandled serverless Express error:', err);
         if (!res.headersSent) {

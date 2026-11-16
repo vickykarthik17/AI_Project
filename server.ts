@@ -6,7 +6,6 @@ import multer from 'multer';
 import crypto from 'node:crypto';
 import path from 'node:path';
 import zlib from 'node:zlib';
-import { createServer as createViteServer } from 'vite';
 import {
   buildStructuredRevisionTasks,
   calculateConfidenceLevel,
@@ -1498,6 +1497,7 @@ export async function startServer() {
   const PORT = Number(process.env.PORT) || 3000;
 
   if (process.env.NODE_ENV !== 'production') {
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
