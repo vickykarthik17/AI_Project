@@ -1,8 +1,9 @@
+import { createExpressApp } from '../server';
+
 let cachedApp: any = null;
 
 async function getApp() {
   if (!cachedApp) {
-    const { createExpressApp } = await import('../server');
     cachedApp = await createExpressApp();
   }
   return cachedApp;
@@ -11,31 +12,15 @@ async function getApp() {
 export default async function handler(req: any, res: any) {
   const pathname = (req.url || '').split('?')[0];
 
-  // 0. Instant health and diagnostics endpoint
+  // 0. Instant health and diagnostics endpoint (< 1ms)
   if (pathname === '/api/health' || pathname === '/health') {
-    const diag: any = {
+    res.status(200).json({
       status: 'ok',
       node: process.version,
       platform: process.platform,
       arch: process.arch,
       timestamp: new Date().toISOString(),
-    };
-
-    try {
-      const s = await import('../server');
-      diag.serverImport = 'success';
-      diag.exportedKeys = Object.keys(s);
-      diag.appType = typeof s.createExpressApp;
-    } catch (err: any) {
-      diag.serverImport = 'failed';
-      diag.serverError = {
-        message: err?.message,
-        code: err?.code,
-        stack: err?.stack,
-      };
-    }
-
-    res.status(200).json(diag);
+    });
     return;
   }
 
@@ -44,8 +29,8 @@ export default async function handler(req: any, res: any) {
     req.headers['x-matched-path'] ||
     req.headers['x-invoke-path'] ||
     req.originalUrl;
-  if (req.url === '/api/index.ts' && matchedPath) {
-    req.url = matchedPath;
+  if (req.url === '/api/index.js' || req.url === '/api/index.ts') {
+    if (matchedPath) req.url = matchedPath;
   }
 
   // 2. Normalize pre-parsed JSON body from Vercel Node runtime
@@ -59,7 +44,7 @@ export default async function handler(req: any, res: any) {
     } catch {}
   }
 
-  // 3. Lazy initialize Express application with error containment
+  // 3. Lazy initialize Express application
   let app: any;
   try {
     app = await getApp();
