@@ -1,25 +1,41 @@
-import { createExpressApp } from '../server';
-
 let cachedApp: any = null;
 
 async function getApp() {
   if (!cachedApp) {
+    const { createExpressApp } = await import('../server');
     cachedApp = await createExpressApp();
   }
   return cachedApp;
 }
 
 export default async function handler(req: any, res: any) {
-  // 0. Instant health and diagnostics endpoint (< 1ms, zero cold boot delay)
   const pathname = (req.url || '').split('?')[0];
+
+  // 0. Instant health and diagnostics endpoint
   if (pathname === '/api/health' || pathname === '/health') {
-    res.status(200).json({
+    const diag: any = {
       status: 'ok',
       node: process.version,
       platform: process.platform,
       arch: process.arch,
       timestamp: new Date().toISOString(),
-    });
+    };
+
+    try {
+      const s = await import('../server');
+      diag.serverImport = 'success';
+      diag.exportedKeys = Object.keys(s);
+      diag.appType = typeof s.createExpressApp;
+    } catch (err: any) {
+      diag.serverImport = 'failed';
+      diag.serverError = {
+        message: err?.message,
+        code: err?.code,
+        stack: err?.stack,
+      };
+    }
+
+    res.status(200).json(diag);
     return;
   }
 
@@ -53,6 +69,7 @@ export default async function handler(req: any, res: any) {
       res.status(500).json({
         error: 'Initialization failed',
         message: initErr?.message || String(initErr),
+        code: initErr?.code,
         stack: initErr?.stack,
         nodeVersion: process.version,
       });
