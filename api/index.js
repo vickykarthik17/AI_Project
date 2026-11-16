@@ -7837,7 +7837,6 @@ ${topicContext}`,
 // server.ts
 dotenv.config();
 dotenv.config({ path: ".env.local", override: true });
-initDatabase();
 var upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 15 * 1024 * 1024 }
@@ -7860,7 +7859,7 @@ async function recalculateUserGapDiagnoses(userId, subjectFilter, token) {
 }
 var dbInitialized = false;
 async function createExpressApp() {
-  const app2 = express();
+  const app = express();
   const PORT = Number(process.env.PORT) || 3e3;
   if (!dbInitialized) {
     try {
@@ -7870,7 +7869,7 @@ async function createExpressApp() {
       console.warn("Database initialization note:", e.message);
     }
   }
-  app2.use((req, _res, next) => {
+  app.use((req, _res, next) => {
     const matchedPath = req.headers["x-matched-path"] || req.headers["x-invoke-path"] || req.originalUrl;
     if (req.url === "/api/index.js" || req.url === "/api/index" || req.url === "/api") {
       if (matchedPath && matchedPath !== "/api/index.js" && matchedPath !== "/api/index" && matchedPath !== "/api") {
@@ -7879,7 +7878,7 @@ async function createExpressApp() {
     }
     next();
   });
-  app2.use((req, res, next) => {
+  app.use((req, res, next) => {
     if (req.body && typeof req.body === "object") {
       return next();
     }
@@ -8997,12 +8996,12 @@ async function createExpressApp() {
       declinedTopics: diagnoses.filter((d) => d.trendDelta < 0)
     });
   });
-  app2.use("/api", router);
-  app2.use("/", router);
-  return app2;
+  app.use("/api", router);
+  app.use("/", router);
+  return app;
 }
 async function startServer() {
-  const app2 = await createExpressApp();
+  const app = await createExpressApp();
   const PORT = Number(process.env.PORT) || 3e3;
   if (process.env.NODE_ENV !== "production" && !process.env.VERCEL) {
     const vitePkg = "vite";
@@ -9011,18 +9010,18 @@ async function startServer() {
       server: { middlewareMode: true },
       appType: "spa"
     });
-    app2.use(vite.middlewares);
+    app.use(vite.middlewares);
   } else {
     const distPath = path4.join(process.cwd(), "dist");
-    app2.use(express.static(distPath));
-    app2.get("*", (_req, res) => {
+    app.use(express.static(distPath));
+    app.get("*", (_req, res) => {
       res.sendFile(path4.join(distPath, "index.html"));
     });
   }
-  app2.listen(PORT, "0.0.0.0", () => {
+  app.listen(PORT, "0.0.0.0", () => {
     console.log(`GapFinder AI server running on http://localhost:${PORT}`);
   });
-  return app2;
+  return app;
 }
 var isDirectExecution = process.argv[1] && (process.argv[1].endsWith("server.ts") || process.argv[1].endsWith("server.js")) && !process.env.VERCEL && !process.env.AWS_LAMBDA_FUNCTION_NAME;
 if (isDirectExecution) {
@@ -9030,8 +9029,65 @@ if (isDirectExecution) {
 }
 
 // src/server/handler.ts
-var app = await createExpressApp();
-var handler_default = app;
+var cachedApp = null;
+async function getApp() {
+  if (!cachedApp) {
+    cachedApp = await createExpressApp();
+  }
+  return cachedApp;
+}
+async function handler(req, res) {
+  try {
+    const matchedPath = req.headers?.["x-matched-path"] || req.headers?.["x-invoke-path"] || req.originalUrl;
+    if (req.url === "/api/index.js" || req.url === "/api/index" || req.url === "/api") {
+      if (matchedPath && matchedPath !== "/api/index.js" && matchedPath !== "/api/index" && matchedPath !== "/api") {
+        req.url = matchedPath;
+      }
+    }
+    if (typeof req.body === "string" && req.body.length > 0) {
+      try {
+        req.body = JSON.parse(req.body);
+      } catch {
+      }
+    } else if (Buffer.isBuffer(req.body)) {
+      try {
+        req.body = JSON.parse(req.body.toString("utf8"));
+      } catch {
+      }
+    }
+    const app = await getApp();
+    return new Promise((resolve) => {
+      res.on("finish", resolve);
+      res.on("close", resolve);
+      app(req, res, (err) => {
+        if (err) {
+          console.error("Unhandled Express error:", err);
+          if (!res.headersSent) {
+            res.statusCode = 500;
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ error: err.message || "Internal server error" }));
+          }
+        } else if (!res.headersSent) {
+          res.statusCode = 404;
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ error: "Endpoint not found: " + req.url }));
+        }
+        resolve(void 0);
+      });
+    });
+  } catch (err) {
+    console.error("Fatal Serverless Handler Error:", err);
+    if (!res.headersSent) {
+      res.statusCode = 500;
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({
+        error: "Serverless initialization error",
+        message: err?.message || String(err),
+        stack: err?.stack
+      }));
+    }
+  }
+}
 export {
-  handler_default as default
+  handler as default
 };
