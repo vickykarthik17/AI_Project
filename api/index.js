@@ -181111,7 +181111,7 @@ if (isDirectExecution) {
   startServer();
 }
 
-// api/index.ts
+// src/server/handler.ts
 var cachedApp = null;
 async function getApp() {
   if (!cachedApp) {
