@@ -1,3 +1,28 @@
+// Serverless environment DOM polyfills for headless PDF and canvas engines
+if (typeof (globalThis as any).DOMMatrix === 'undefined') {
+  (globalThis as any).DOMMatrix = class DOMMatrix {
+    a = 1; b = 0; c = 0; d = 1; e = 0; f = 0;
+    constructor(_init?: any) {}
+  };
+}
+if (typeof (globalThis as any).ImageData === 'undefined') {
+  (globalThis as any).ImageData = class ImageData {
+    data: Uint8ClampedArray;
+    width: number;
+    height: number;
+    constructor(w = 0, h = 0) {
+      this.width = w;
+      this.height = h;
+      this.data = new Uint8ClampedArray(w * h * 4);
+    }
+  };
+}
+if (typeof (globalThis as any).Path2D === 'undefined') {
+  (globalThis as any).Path2D = class Path2D {
+    constructor() {}
+  };
+}
+
 import { createExpressApp } from '../../server';
 
 let cachedApp: any = null;
