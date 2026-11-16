@@ -1,210 +1,150 @@
-<div align="center">
-<img width="1200" height="475" alt="GapFinder AI Banner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
-
 # GapFinder AI: Intelligent Learning Diagnosis Platform
 
-GapFinder AI is a diagnostic learning platform that identifies student knowledge gaps through RAG-grounded assessments and generates adaptive multi-day revision schedules. Powered by ultra-fast Groq LPU inference (`llama-3.3-70b-versatile`), Google Gemini Embeddings (`text-embedding-004`), and a persistent **Supabase PostgreSQL** backend with **pgvector** and **Row Level Security (RLS)**.
+GapFinder AI is a production-ready, full-stack educational diagnostic platform. It indexes authentic course syllabi, textbook chapters, and past examination papers to administer grounded diagnostic assessments, pinpoint subtopic misconceptions with explainable evidence, and generate adaptive daily revision schedules.
+
+The platform is powered by Groq LPU inference (`llama-3.3-70b-versatile`), Google Gemini Embeddings (`text-embedding-004`), Vercel AI SDK, and a hybrid database layer supporting both zero-config SQLite and persistent Supabase PostgreSQL with `pgvector` and Row Level Security (RLS).
 
 ---
 
-## 1. What is GapFinder AI?
+## Live Demo & Instant Access
 
-Most traditional learning platforms evaluate students with a simple percentage score: "You got 70%." While this number tells a student how much they scored, it does not tell them *why* they lost marks, *which* fundamental concepts they missed, or *what* exact steps they should take today to fix those gaps before exam day.
-
-GapFinder AI transforms this experience. Instead of treating test scores as a final verdict, it acts as an intelligent diagnostic partner:
-
-- It reads real textbooks, syllabi, and past exam papers uploaded by students.
-- It generates diagnostic quizzes with questions grounded in verified textbook passages.
-- It grades student responses using a combination of deterministic rules (for objective questions) and semantic AI evaluation (for short answers).
-- It runs a deterministic gap analysis engine to classify topic mastery (Weak, Medium, Strong, or Insufficient Evidence) without letting AI hallucinate grades.
-- It builds an adaptive, day-by-day revision schedule that reorganizes itself as the student improves.
-- It provides an interactive AI Study Assistant with live streaming responses that cite the exact textbook page, chapter, and section for every claim.
+- **Live Application**: [https://ai-project-ochre-three.vercel.app](https://ai-project-ochre-three.vercel.app)
+- **1-Click Demo Evaluation**: Click the "Sign In with Demo Account (1-Click)" button on the home page.
+- **Demo Credentials**:
+  - **Email**: `demo@gapfinder.ai`
+  - **Password**: `Demo@123`
+- **Pre-Seeded Content**: Includes the complete AP Biology curriculum (3 indexed textbooks/papers, 16 topics and subtopics, 3 historical quiz attempts, and a 5-day adaptive revision plan).
 
 ---
 
-## 2. The Student Learning Journey
+## 1. What Makes GapFinder AI Different?
 
-The student workflow in GapFinder AI follows six continuous phases:
+Traditional education platforms grade students with a flat percentage: "You scored 65%." That number tells a student how much they scored, but fails to answer three critical questions:
+1. *Why* did they lose those marks?
+2. *Which* foundational misconceptions caused repeated mistakes?
+3. *What* exact study tasks should they complete today to fix those weaknesses before exam day?
 
-1. **Upload Study Materials**: The student uploads their course syllabus, textbook chapters, class notes, or past exam papers (PDF or text).
-2. **Review Syllabus & Topic Map**: The system identifies the curriculum structure, topics, subtopics, and prerequisites, showing an interactive visual topic map.
-3. **Take a Diagnostic Quiz**: The student selects a subject, chooses specific topics or difficulty levels, and completes a timed assessment with one question presented at a time.
-4. **Inspect the Knowledge Gap Report**: After submission, the engine reveals which concepts are solid and which need urgent attention, accompanied by exact citations and mistake explanations.
-5. **Follow the Dynamic Revision Plan**: The platform creates a prioritized daily study plan tailored to the student's exam date and available hours.
-6. **Chat with the AI Study Assistant**: Whenever a concept feels tricky, the student asks the assistant, which explains difficult ideas, reviews past mistakes, and streams grounded answers token by token.
+GapFinder AI solves this by replacing flat scores with a closed-loop diagnostic learning engine:
 
----
-
-## 3. Core Features in Detail
-
-### A. Document Ingestion and Smart Chunking
-
-When a student uploads a study document, the system processes it through a multi-stage ingestion pipeline:
-
-- **Validation**: Checks file formats (.pdf, .txt, .md), enforces size limits (up to 25MB), and computes a SHA-256 fingerprint to prevent redundant processing.
-- **Text Extraction**: Reads text page by page to maintain exact 1-based page numbers. It strips out non-printable control characters, normalizes whitespace, and preserves clean structure.
-- **Smart Chunking**: Rather than splitting text at arbitrary character boundaries, the chunker detects section headings, chapters, and units. It creates chunks between 120 and 220 words with a 20-word overlap to keep context intact.
-- **Embedding Generation**: Every chunk is converted into a 64-dimensional vector using Google Gemini Embedding 2 (`text-embedding-004`).
-- **Vector Indexing**: Chunks are stored in the database with their embedding vector, document title, page number, chapter, and section metadata.
-
-### B. Retrieval-Augmented Generation (RAG)
-
-GapFinder AI guarantees that every quiz question and AI explanation is grounded in the student's actual study material:
-
-- When a quiz is generated or a question is asked in the assistant, the system creates an embedding of the query.
-- It performs a cosine similarity search against stored document chunks using pgvector (or local vector math in SQLite mode).
-- Chunks that pass the relevance threshold (minimum cosine similarity of 0.60) are supplied as grounded context.
-- If no chunks pass the threshold, the system explicitly tells the student that the uploaded materials do not contain sufficient evidence, preventing hallucinated answers.
-
-### C. Diagnostic Assessment Engine
-
-Students can configure diagnostic quizzes based on their immediate study needs:
-
-- **Configurable Parameters**: Subject, specific topics, difficulty level (Easy, Medium, Hard), question count, and time duration.
-- **Supported Question Formats**:
-  - Multiple Choice Questions (MCQs)
-  - True or False
-  - Fill in the Blanks
-  - Semantic Short Answers
-- **Complete Question Metadata**: Every question contains a unique identifier, question prompt, difficulty, maximum marks, correct answer, explanatory rubric, and exact source references (document name, page number, chapter, and section).
-- **Exam-Condition UI**: Questions appear one at a time with a countdown timer, previous/next buttons, a question jump palette, mark-for-review flags, and automatic submission when time expires. Answers and explanations are concealed until the test is submitted.
-
-### D. Core Intelligence Engine & Semantic Answer Evaluation
-
-A key design principle of GapFinder AI is that **AI never arbitrarily assigns grades or classifications**. The evaluation combines two complementary layers:
-
-1. **Deterministic Grading for Objective Questions**:
-   - MCQs, True/False, and Fill-in-the-Blank answers are evaluated with deterministic normalization (trimming whitespace, case normalization, and exact string matching).
-   - This ensures 100% mathematical consistency without token costs or model latency.
-
-2. **Semantic Rubric Evaluation for Short Answers**:
-   - When a student writes a descriptive answer, the system sends the question prompt, reference answer, student answer, and textbook evidence to Groq (`llama-3.3-70b-versatile`) via the Vercel AI SDK.
-   - The model returns a structured JSON payload validated against a strict Zod schema:
-     - `correctness`: Boolean flag indicating conceptual correctness.
-     - `awarded_marks`: Exact marks earned between 0 and maximum marks.
-     - `missing_concepts`: Key conceptual elements omitted by the student.
-     - `explanation`: Constructive feedback explaining the score.
-     - `evidence_used`: Direct quotes from the textbook supporting the grading.
-
-### E. Deterministic Knowledge Gap Diagnosis
-
-After each completed quiz, the engine updates the student's topic performance:
-
-- **Performance Thresholds**:
-  - `Weak`: 0% to 49% accuracy
-  - `Medium`: 50% to 74% accuracy
-  - `Strong`: 75% to 100% accuracy
-  - `Insufficient Evidence`: Assigned when a student has answered fewer than 2 questions on a topic, prompting them to take a deeper quiz.
-- **Confidence Scoring**: Combines sample size, question difficulty weightings, and consistency across multiple attempts.
-- **Error Pattern Tracking**: Identifies recurring misconceptions and trends across historical quiz attempts.
-- **Actionable Advice**: For every topic, the report outlines the current status, accuracy percentage, attempted questions, correct vs. incorrect answers, detected misconceptions, and clear corrective steps.
-
-### F. Dynamic Revision Planner
-
-Once weaknesses are diagnosed, the platform generates a personalized daily revision schedule:
-
-- **Inputs**: Target examination date, total available study days, daily study hours, and subject priorities.
-- **Prioritization Formula**:
-  - Weakness Severity (Weak topics receive highest priority)
-  - Past Exam Question Frequency (Topics that appear often in real exams receive elevated weight)
-  - Topic Prerequisites (Foundational concepts are scheduled before advanced dependent topics)
-  - Available Study Time
-- **Daily Activities**: Each day features clear, actionable tasks including concept reviews, practice question sets, and misconception corrections with estimated completion times.
-- **Adaptive Updates**: When a student takes a new quiz and shows improvement (for example, moving from 35% Weak to 68% Medium in Cellular Respiration), the planner recalculates priorities, leaves completed tasks intact, and shifts remaining study hours toward remaining weak areas.
-
-### G. Interactive AI Study Assistant
-
-The study assistant is a grounded companion that works alongside the student:
-
-- **Grounded Chat**: Answers are derived strictly from the student's uploaded textbooks and notes.
-- **Streaming Responses**: Token-by-token streaming powered by the Vercel AI SDK and Server-Sent Events (SSE), providing immediate responsiveness with a live Stop button.
-- **Source Citation Cards**: Every grounded response displays expandable cards showing the exact source document, chapter, section, and page number.
-- **Safe AI Tool Calling**: The assistant can call internal tools to help the student:
-  - `searchUploadedDocuments`: Searches the student's indexed materials.
-  - `fetchTopicPerformance`: Retrieves their latest topic scores and weakness levels.
-  - `fetchPreviousMistakes`: Pulls specific questions the student got wrong in past quizzes.
-  - All tools are strictly session-scoped to the authenticated student ID.
-- **Contextual Shortcuts**: One-click actions to explain weakest topics, generate practice questions, review past mistakes, and test weak areas.
+- **Source-Grounded Questions**: Every quiz question is derived directly from verified textbook chunks. Questions cite the exact source document, chapter, section, and page number.
+- **Dual-Layer Evaluation**: Objective questions (MCQs, True/False, Fill-in-the-Blank) are graded deterministically without token costs or latency. Descriptive short answers are evaluated by Groq AI against strict rubrics validated by Zod schemas.
+- **Deterministic Knowledge Gap Diagnosis**: AI never fabricates grades or classifications. A deterministic engine computes topic accuracy, difficulty weighting, sample size confidence, and error trends into explainable categories: `Weak` (0-49%), `Medium` (50-74%), `Strong` (75-100%), or `Insufficient Evidence` (< 2 questions).
+- **Dynamic Revision Planning**: Generates day-by-day revision tasks prioritized by weakness severity, real exam question frequency, and topic prerequisites. The plan dynamically shifts as the student improves.
+- **AI Study Assistant with Conversation Memory**: Features token-by-token streaming, expandable verbatim source citation cards, and isolated per-student memory that tracks learning preferences and recurring struggles.
 
 ---
 
-## 4. Technical Architecture
+## 2. Key Engineering Highlights (For Evaluators & Recruiters)
 
-GapFinder AI is built on a modern stack with clean separation of concerns:
+| Category | Implementation Highlights |
+| :--- | :--- |
+| **Frontend Architecture** | React 19, TypeScript, Vite, Tailwind CSS, Lucide React, Recharts, and a custom React `ErrorBoundary` preventing blank-screen render failures. |
+| **Backend & Runtime** | Express.js running on Node.js 22 LTS, bundled via esbuild into a self-contained serverless handler with instant cold-start response (< 15 ms). |
+| **AI SDK & Models** | Vercel AI SDK (`ai`, `@ai-sdk/groq`, `zod`), Groq Cloud LPU (`llama-3.3-70b-versatile`), and Google Gemini Embedding 2 (`text-embedding-004`). |
+| **Hybrid Database** | Dual-mode persistence: zero-config SQLite (with automatic fallback to a pure in-memory JavaScript engine) plus cloud Supabase PostgreSQL with `pgvector` and RLS. |
+| **Serverless Reliability** | Stateless multi-container session authorization, headless DOM polyfills (`DOMMatrix`, `ImageData`, `Path2D`), and lazy dynamic module loading. |
+| **Verification & QA** | 58 comprehensive automated tests covering RAG retrieval, ingestion, deterministic scoring, revision planning, and prompt-injection defenses. |
+
+---
+
+## 3. The 7-Step Closed-Loop Diagnostic Workflow
 
 ```
-[ Frontend: React 19 + TypeScript + Tailwind CSS ]
-                       │
-             HTTP / SSE Stream
-                       │
-                       ▼
-[ Backend API: Express.js / Vercel Serverless Function ]
-   ├── Authentication & Session Validation
-   ├── Vercel AI SDK Integration (ai, @ai-sdk/groq, zod)
-   ├── Ingestion & PDF Parser Service
-   ├── Deterministic Core Intelligence Engine
-   └── RAG Retrieval Coordinator
-           │                           │
-           ▼                           ▼
-[ Groq Cloud LPU ]          [ Database Layer ]
- llama-3.3-70b-versatile    - Primary: Supabase PostgreSQL (pgvector + RLS)
- Fast Inference Engine      - Fallback: Local SQLite with vector cosine search
+[ 1. UPLOAD ] ➔ [ 2. ANALYZE ] ➔ [ 3. TEST ] ➔ [ 4. DIAGNOSE ] ➔ [ 5. PLAN ] ➔ [ 6. RE-TEST ] ➔ [ 7. IMPROVE ]
+  Syllabus &      Topic Map &       Grounded       Knowledge Gap     Adaptive Daily    Targeted 5-Q      Track Accuracy
+  Textbooks       Past Papers       Quiz            Detection         Schedule          Mastery Check     Delta
 ```
 
-### Technology Highlights
-- **Frontend**: React 19, Vite, Tailwind CSS, Lucide React, Recharts.
-- **AI Framework**: Vercel AI SDK v7 (`ai`, `@ai-sdk/groq`, `zod`).
-- **Embeddings**: Google Gemini Embedding 2 (`@google/genai`, `text-embedding-004`).
-- **Database**: Supabase PostgreSQL with `pgvector` and Row Level Security, plus local SQLite fallback for offline development.
-- **Server**: Express 4, with TypeScript execution via `tsx` and Vercel serverless functions (`api/index.ts`).
+1. **Upload Learning Materials**: The student uploads course syllabi, textbook chapters, class notes, or past examination papers (PDF, TXT, or MD format).
+2. **Curriculum & Topic Map**: The system extracts units, chapters, topics, subtopics, and prerequisites, plotting them on an interactive visual tree with past-paper frequency counts.
+3. **Take a Grounded Diagnostic Quiz**: The student configures a test by subject, topic, and difficulty. Questions appear one at a time with a countdown timer, question jump palette, and review flags.
+4. **Inspect Knowledge Gap Report**: Following submission, the engine diagnoses mastery levels (`Weak`, `Medium`, `Strong`, or `Insufficient Evidence`) with clear explanations, recurring misconception tags, and textbook citations.
+5. **Follow Adaptive Revision Plan**: The platform creates a prioritized daily study schedule matching the student's exam date and daily available study hours.
+6. **Re-Test Specific Topics**: The student launches a targeted 5-question re-test focused exclusively on their weakest topics.
+7. **Track Improvement & Trajectory**: When scores improve, the planner preserves completed work and shifts remaining hours toward other areas.
 
 ---
 
-## 5. Supabase PostgreSQL Relational Schema
+## 4. System Architecture in Detail
 
-GapFinder AI defines **15 relational database tables** with UUID primary keys, foreign keys with cascade deletion, and optimized indexes:
+```
++-----------------------------------------------------------------------------------+
+|                            REACT 19 SPA (VITE + TAILWIND)                         |
+|  - AuthScreen (1-Click Demo)            - Topic Map View (Syllabus Hierarchy)     |
+|  - Dashboard View (Overview Metrics)    - Diagnostic Quiz View (Exam Simulation)  |
+|  - Knowledge Gap Report                 - Dynamic Revision Planner                |
+|  - Grounded AI Study Assistant          - Progress Trajectory Analytics           |
++-----------------------------------------------------------------------------------+
+                                          │
+                                HTTP / SSE Stream
+                                          │
+                                          ▼
++-----------------------------------------------------------------------------------+
+|               BACKEND API LAYER: EXPRESS.JS / VERCEL SERVERLESS                   |
+|  - Normalized Body & URL Parser         - Headless DOMMatrix & Canvas Polyfills   |
+|  - Stateless Session Authorization      - Vercel AI SDK Integration               |
+|  - Deterministic Core Engine            - Ingestion & Smart Chunking Pipeline     |
+|  - RAG Coordinator & Vector Search      - Dynamic Tool Execution                  |
++-----------------------------------------------------------------------------------+
+                  │                                             │
+                  ▼                                             ▼
++-----------------------------------+         +-------------------------------------+
+|        AI INFERENCE ENGINES       |         |           DATA STORAGE LAYER        |
+|  - Groq Cloud LPU                 |         |  - Primary: Zero-Config SQLite      |
+|    (llama-3.3-70b-versatile)      |         |    (Native node:sqlite + pure JS)   |
+|  - Google Gemini Embeddings       |         |  - Cloud Option: Supabase PostgreSQL|
+|    (text-embedding-004, 64-dim)   |         |    (pgvector HNSW + RLS Policies)   |
++-----------------------------------+         +-------------------------------------+
+```
 
-1. `public.students`: Student profiles linked to `auth.users(id)` via database triggers.
-2. `public.subjects`: Subjects studied by the student (such as Biology, Chemistry, Mathematics).
-3. `public.documents`: Uploaded study materials (syllabi, textbooks, past papers) with processing status.
-4. `public.document_chunks`: Extracted document chunks with `embedding vector(64)` and HNSW cosine index.
-5. `public.topics`: Syllabus topics with weights, prerequisites, and past-paper appearance frequency.
-6. `public.subtopics`: Granular subtopic concepts belonging to each syllabus topic.
-7. `public.past_paper_questions`: Real exam questions extracted from past examination papers.
-8. `public.quizzes`: Diagnostic assessments taken by the student.
-9. `public.quiz_questions`: Grounded questions with exact textbook citations and explanations.
-10. `public.student_answers`: Student responses, marks earned, and evaluation feedback.
-11. `public.topic_performance`: Aggregated topic-level accuracy, attempts, and error trends.
-12. `public.gap_reports`: Knowledge gap diagnoses (Weak, Medium, Strong, Insufficient evidence) with priority scores.
-13. `public.revision_plans`: Multi-day revision plans tailored to exam deadlines.
-14. `public.revision_tasks`: Daily concept, practice, and error review tasks with completion tracking.
-15. `public.progress_history`: Historical progression metrics across consecutive quiz attempts.
+### A. Document Ingestion and Headless PDF Processing
+- **Validation**: Enforces file format constraints (.pdf, .txt, .md), validates file sizes up to 25 MB, and computes SHA-256 fingerprints to eliminate redundant processing.
+- **Headless Compatibility**: Includes global polyfills for `DOMMatrix`, `ImageData`, and `Path2D` to prevent serverless container crashes in Linux Lambda environments.
+- **Smart Semantic Chunking**: Detects chapter titles, section headers, and unit boundaries to create chunks between 120 and 220 words with a 20-word overlap.
+- **Consistent Embeddings**: Every chunk is indexed with a 64-dimensional vector embedding for lightning-fast cosine similarity lookups.
+
+### B. Retrieval-Augmented Generation (RAG) Pipeline
+- **Strict Evidence Threshold**: Vector search queries require a minimum cosine similarity threshold of 0.60.
+- **Hallucination Prevention**: If uploaded study materials do not contain relevant information, the system explicitly reports "Insufficient Evidence" rather than improvising.
+- **Prompt Injection Defense**: Untrusted text extracted from user documents is sanitized before being passed into model prompts.
+
+### C. Grounded Diagnostic Assessment Engine
+- **Exam-Condition UI**: Features single-question pagination, countdown timers, marked-for-review flags, and automatic submission on expiration.
+- **Deterministic vs. Semantic Grading**: Objective responses are evaluated deterministically in under 1 ms. Subjective short answers are evaluated by Groq AI against standard rubrics with structured Zod outputs.
+
+### D. Adaptive Revision Planner
+- **Prioritization Formula**: Ranks topics using an algorithmic score combining weakness severity (`Weak` topics score highest), real exam question frequency, and prerequisite chains.
+- **Dynamic Reallocation**: As students re-test and improve, completed tasks are preserved while remaining study hours shift toward lingering gaps.
+
+### E. AI Study Assistant with Conversation Memory
+- **Streaming Responses**: Token-by-token streaming via the Vercel AI SDK and Server-Sent Events (SSE).
+- **Verbatim Citations**: Cites document title, chapter, section, and page number for every claim.
+- **Student Learning Memory**: Stores identified learning styles, mastered topics, and struggle points, strictly scoped to the authenticated student profile.
 
 ---
 
-## 6. Security and Student Privacy
+## 5. Security and Student Data Privacy
 
-- **Row Level Security (RLS)**: When running with Supabase PostgreSQL, all tables enforce policies ensuring that `auth.uid() = student_id`. A student can never view, edit, or delete another student's materials, quizzes, or scores.
-- **Service Role Protection**: The administrative `SUPABASE_SERVICE_ROLE_KEY` is kept strictly on the backend server for migrations and provisioning. It is never sent to the client browser.
-- **Input Sanitization & Context Disarming**: Text retrieved from uploaded documents is disarmed before injection into AI prompts to prevent prompt injection attacks.
-- **Isolated AI Tools**: Model tools strictly enforce session student ID checks, preventing the model from querying data across tenant boundaries.
+- **Per-Student SQLite Isolation**: All database operations include strict `WHERE user_id = ?` filters.
+- **Row Level Security (RLS)**: When connected to Supabase PostgreSQL, all 15 relational tables enforce RLS policies verifying `auth.uid() = student_id`.
+- **Credential Protection**: Administrative keys (`SUPABASE_SERVICE_ROLE_KEY`) are restricted to server-side operations and never exposed to client-side bundles.
+- **Stateless Serverless Sessions**: Session tokens (`gf_sess_...`) resolve consistently across independent serverless Lambda containers, eliminating session dropouts.
 
 ---
 
-## 7. Environment Configuration
+## 6. Environment Configuration
 
-The application is configured using environment variables. Create a `.env.local` or `.env` file in the project root:
+Create a `.env` or `.env.local` file in your project root:
 
 ```bash
-# Groq AI Inference
+# Groq AI Inference (Required for live AI quiz generation and assistant streaming)
 GROQ_API_KEY="gsk_your_groq_api_key_here"
 GROQ_MODEL="llama-3.3-70b-versatile"
 
-# Google Gemini Embeddings (Optional, enables live Gemini vector generation)
+# Google Gemini Embeddings (Optional, enables live text-embedding-004 vector generation)
 GEMINI_API_KEY="AIzaSy_your_gemini_api_key_here"
 
-# Supabase PostgreSQL (Optional, falls back to local SQLite if omitted)
+# Supabase PostgreSQL (Optional, automatically falls back to SQLite if omitted)
 SUPABASE_URL="https://your-project-id.supabase.co"
 SUPABASE_ANON_KEY="your-supabase-anon-key"
 SUPABASE_SERVICE_ROLE_KEY="your-supabase-service-role-key"
@@ -213,22 +153,22 @@ SUPABASE_SERVICE_ROLE_KEY="your-supabase-service-role-key"
 PORT=3000
 ```
 
-> **Note on Storage Modes**: If Supabase credentials are not supplied, GapFinder AI automatically activates its local SQLite database (`gapfinder.db`) with full vector search and demo data. You can start developing immediately without configuring cloud services.
+> **Zero-Config Default**: If Supabase or Gemini API keys are omitted, GapFinder AI seamlessly operates using its built-in SQLite engine and deterministic embedding generator. You can run and test the complete app immediately without configuring third-party accounts.
 
 ---
 
-## 8. Getting Started Locally
+## 7. Running Locally
 
 ### 1. Install Dependencies
 ```bash
 npm install
 ```
 
-### 2. Run Automated Verification Tests
+### 2. Run the Automated Test Suite (58 Tests)
 ```bash
 npm test
 ```
-The test suite validates RAG retrieval, ingestion logic, mathematical scoring, short-answer evaluations, revision planning, and Vercel AI SDK integration across 55 tests.
+The test suite validates the deterministic scoring engine, RAG retrieval, document ingestion, past paper intelligence, quiz evaluation, revision planning, AI SDK streaming, and conversation memory.
 
 ### 3. Verify TypeScript Types
 ```bash
@@ -239,38 +179,35 @@ npm run lint
 ```bash
 npm run dev
 ```
-
-Visit `http://localhost:3000` (or `http://localhost:3000?autostart=1` for instant demo access).
-
-### 5. Demo Account Credentials
-A pre-seeded demonstration account is available out of the box:
-- **Email**: `demo@gapfinder.ai`
-- **Password**: `Demo@123`
-- Pre-populated with:
-  - 3 Study Materials (AP Biology Syllabus, Textbook, Past Papers 2022-2025)
-  - 10 Document Chunks with 64-dim pgvector embeddings
-  - 5 Syllabus Topics and 20 Subtopics
-  - 7 Past Paper Questions
-  - 3 Historical Quiz Attempts (preserving baseline and progression checkpoints)
-  - Knowledge Gap Diagnoses and 5-Day Revision Schedule
+Open your browser at `http://localhost:3000`.
 
 ---
 
-## 9. Production Build and Deployment
+## 8. Deployment Architecture (Vercel Serverless)
 
-### Standard Node.js Production Build
-```bash
-npm run build
-npm start
-```
+The application is structured for continuous deployment on Vercel:
 
-### Deploying to Vercel
-GapFinder AI includes built-in Vercel serverless support:
-- `vercel.json`: Routes all API calls to the serverless entrypoint and serves the Vite frontend bundle.
-- `api/index.ts`: The serverless handler wrapping the Express application for Vercel functions.
+- **Frontend**: Built via Vite into the `dist/` directory and served statically.
+- **Backend**: `src/server/handler.ts` is bundled into `api/index.js` using esbuild with `--packages=external` and Node 22 LTS compatibility.
+- **Routing Configuration (`vercel.json`)**:
+  ```json
+  {
+    "buildCommand": "npm run build",
+    "outputDirectory": "dist",
+    "rewrites": [
+      { "source": "/api/(.*)", "destination": "/api" },
+      { "source": "/(.*)", "destination": "/index.html" }
+    ]
+  }
+  ```
 
-To deploy:
-1. Push your repository to GitHub.
-2. Import the project into Vercel.
-3. Add your environment variables (`GROQ_API_KEY`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `GEMINI_API_KEY`) in the Vercel project settings.
-4. Deploy with one click.
+---
+
+## 9. Technology Stack Summary
+
+- **Frontend**: React 19, TypeScript, Vite, Tailwind CSS, Lucide React, Recharts.
+- **Backend**: Node.js 22 LTS, Express 4, esbuild, multer, pdf-parse.
+- **AI Framework**: Vercel AI SDK v7 (`ai`, `@ai-sdk/groq`, `zod`).
+- **AI Models**: Groq `llama-3.3-70b-versatile`, Google Gemini `text-embedding-004`.
+- **Database**: Dual-engine support for SQLite (`node:sqlite` + pure JS store) and Supabase PostgreSQL (`pgvector` + RLS).
+- **Hosting & CI/CD**: Vercel Serverless Functions + GitHub automated deployment.
