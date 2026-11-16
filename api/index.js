@@ -7860,7 +7860,7 @@ async function recalculateUserGapDiagnoses(userId, subjectFilter, token) {
 }
 var dbInitialized = false;
 async function createExpressApp() {
-  const app = express();
+  const app2 = express();
   const PORT = Number(process.env.PORT) || 3e3;
   if (!dbInitialized) {
     try {
@@ -7870,7 +7870,16 @@ async function createExpressApp() {
       console.warn("Database initialization note:", e.message);
     }
   }
-  app.use((req, res, next) => {
+  app2.use((req, _res, next) => {
+    const matchedPath = req.headers["x-matched-path"] || req.headers["x-invoke-path"] || req.originalUrl;
+    if (req.url === "/api/index.js" || req.url === "/api/index" || req.url === "/api") {
+      if (matchedPath && matchedPath !== "/api/index.js" && matchedPath !== "/api/index" && matchedPath !== "/api") {
+        req.url = matchedPath;
+      }
+    }
+    next();
+  });
+  app2.use((req, res, next) => {
     if (req.body && typeof req.body === "object") {
       return next();
     }
@@ -7935,6 +7944,23 @@ async function createExpressApp() {
     next();
   };
   const router = express.Router();
+  router.get("/health", (_req, res) => {
+    res.json({
+      status: "ok",
+      service: "GapFinder AI API",
+      node: process.version,
+      platform: process.platform,
+      arch: process.arch,
+      timestamp: (/* @__PURE__ */ new Date()).toISOString()
+    });
+  });
+  router.get("/", (_req, res) => {
+    res.json({
+      status: "ok",
+      service: "GapFinder AI API",
+      timestamp: (/* @__PURE__ */ new Date()).toISOString()
+    });
+  });
   router.post("/auth/register", async (req, res) => {
     try {
       const { name, email, password } = req.body || {};
@@ -8971,12 +8997,12 @@ async function createExpressApp() {
       declinedTopics: diagnoses.filter((d) => d.trendDelta < 0)
     });
   });
-  app.use("/api", router);
-  app.use("/", router);
-  return app;
+  app2.use("/api", router);
+  app2.use("/", router);
+  return app2;
 }
 async function startServer() {
-  const app = await createExpressApp();
+  const app2 = await createExpressApp();
   const PORT = Number(process.env.PORT) || 3e3;
   if (process.env.NODE_ENV !== "production" && !process.env.VERCEL) {
     const vitePkg = "vite";
@@ -8985,18 +9011,18 @@ async function startServer() {
       server: { middlewareMode: true },
       appType: "spa"
     });
-    app.use(vite.middlewares);
+    app2.use(vite.middlewares);
   } else {
     const distPath = path4.join(process.cwd(), "dist");
-    app.use(express.static(distPath));
-    app.get("*", (_req, res) => {
+    app2.use(express.static(distPath));
+    app2.get("*", (_req, res) => {
       res.sendFile(path4.join(distPath, "index.html"));
     });
   }
-  app.listen(PORT, "0.0.0.0", () => {
+  app2.listen(PORT, "0.0.0.0", () => {
     console.log(`GapFinder AI server running on http://localhost:${PORT}`);
   });
-  return app;
+  return app2;
 }
 var isDirectExecution = process.argv[1] && (process.argv[1].endsWith("server.ts") || process.argv[1].endsWith("server.js")) && !process.env.VERCEL && !process.env.AWS_LAMBDA_FUNCTION_NAME;
 if (isDirectExecution) {
@@ -9004,72 +9030,8 @@ if (isDirectExecution) {
 }
 
 // src/server/handler.ts
-var cachedApp = null;
-async function getApp() {
-  if (!cachedApp) {
-    cachedApp = await createExpressApp();
-  }
-  return cachedApp;
-}
-async function handler(req, res) {
-  const pathname = (req.url || "").split("?")[0];
-  if (pathname === "/api/health" || pathname === "/health") {
-    res.status(200).json({
-      status: "ok",
-      node: process.version,
-      platform: process.platform,
-      arch: process.arch,
-      timestamp: (/* @__PURE__ */ new Date()).toISOString()
-    });
-    return;
-  }
-  const matchedPath = req.headers["x-matched-path"] || req.headers["x-invoke-path"] || req.originalUrl;
-  if (req.url === "/api/index.js" || req.url === "/api/index.ts") {
-    if (matchedPath) req.url = matchedPath;
-  }
-  if (typeof req.body === "string" && req.body.length > 0) {
-    try {
-      req.body = JSON.parse(req.body);
-    } catch {
-    }
-  } else if (Buffer.isBuffer(req.body)) {
-    try {
-      req.body = JSON.parse(req.body.toString("utf8"));
-    } catch {
-    }
-  }
-  let app;
-  try {
-    app = await getApp();
-  } catch (initErr) {
-    console.error("Fatal initialization error:", initErr);
-    if (!res.headersSent) {
-      res.status(500).json({
-        error: "Initialization failed",
-        message: initErr?.message || String(initErr),
-        code: initErr?.code,
-        stack: initErr?.stack,
-        nodeVersion: process.version
-      });
-    }
-    return;
-  }
-  return new Promise((resolve) => {
-    res.on("finish", resolve);
-    res.on("close", resolve);
-    app(req, res, (err) => {
-      if (err) {
-        console.error("Unhandled serverless Express error:", err);
-        if (!res.headersSent) {
-          res.status(500).json({ error: err.message || "Internal server error" });
-        }
-      } else if (!res.headersSent) {
-        res.status(404).json({ error: "Endpoint not found: " + req.url });
-      }
-      resolve(void 0);
-    });
-  });
-}
+var app = await createExpressApp();
+var handler_default = app;
 export {
-  handler as default
+  handler_default as default
 };

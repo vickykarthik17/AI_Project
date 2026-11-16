@@ -162,6 +162,20 @@ export async function createExpressApp() {
     }
   }
 
+  // Normalize Vercel rewrite URLs if rewritten to /api or /api/index.js
+  app.use((req: Request, _res: Response, next: NextFunction) => {
+    const matchedPath =
+      (req.headers['x-matched-path'] as string) ||
+      (req.headers['x-invoke-path'] as string) ||
+      (req as any).originalUrl;
+    if (req.url === '/api/index.js' || req.url === '/api/index' || req.url === '/api') {
+      if (matchedPath && matchedPath !== '/api/index.js' && matchedPath !== '/api/index' && matchedPath !== '/api') {
+        req.url = matchedPath;
+      }
+    }
+    next();
+  });
+
   // Non-blocking body parser for both standard Express and Vercel serverless environments
   app.use((req: Request, res: Response, next: NextFunction) => {
     // 1. If body is already parsed by Vercel or upstream
@@ -246,6 +260,26 @@ export async function createExpressApp() {
   };
 
   const router = express.Router();
+
+  // Instant health and runtime diagnostics endpoint
+  router.get('/health', (_req: Request, res: Response) => {
+    res.json({
+      status: 'ok',
+      service: 'GapFinder AI API',
+      node: process.version,
+      platform: process.platform,
+      arch: process.arch,
+      timestamp: new Date().toISOString(),
+    });
+  });
+
+  router.get('/', (_req: Request, res: Response) => {
+    res.json({
+      status: 'ok',
+      service: 'GapFinder AI API',
+      timestamp: new Date().toISOString(),
+    });
+  });
 
   // ============================================================================
   // 1. AUTHENTICATION ENDPOINTS
