@@ -9098,14 +9098,15 @@ async function handler(req, res) {
         req.url = matchedPath;
       }
     }
-    if (typeof req.body === "string" && req.body.length > 0) {
-      try {
+    try {
+      if (typeof req.body === "string" && req.body.length > 0) {
         req.body = JSON.parse(req.body);
-      } catch {
-      }
-    } else if (Buffer.isBuffer(req.body)) {
-      try {
+      } else if (Buffer.isBuffer(req.body)) {
         req.body = JSON.parse(req.body.toString("utf8"));
+      }
+    } catch {
+      try {
+        req.body = {};
       } catch {
       }
     }

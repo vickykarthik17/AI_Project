@@ -46,13 +46,16 @@ export default async function handler(req: any, res: any) {
       }
     }
 
-    if (typeof req.body === 'string' && req.body.length > 0) {
-      try {
+    try {
+      if (typeof req.body === 'string' && req.body.length > 0) {
         req.body = JSON.parse(req.body);
-      } catch {}
-    } else if (Buffer.isBuffer(req.body)) {
-      try {
+      } else if (Buffer.isBuffer(req.body)) {
         req.body = JSON.parse(req.body.toString('utf8'));
+      }
+    } catch {
+      // Safely catch if Vercel getter throws on malformed JSON
+      try {
+        req.body = {};
       } catch {}
     }
 
