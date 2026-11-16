@@ -493,11 +493,51 @@ USING (
 );
 
 -- ============================================================================
--- 8. Table 16: chat_messages (AI Study Assistant persistent memory)
+-- 8. Table 16: conversations (AI Study Assistant Sessions)
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS public.conversations (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    student_id UUID NOT NULL REFERENCES public.students(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    subject TEXT NOT NULL DEFAULT 'Biology',
+    created_at TIMESTAMPTZ DEFAULT now(),
+    updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_conversations_student ON public.conversations(student_id, updated_at DESC);
+ALTER TABLE public.conversations ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Students can access own conversations"
+    ON public.conversations FOR ALL
+    USING (auth.uid() = student_id)
+    WITH CHECK (auth.uid() = student_id);
+
+-- ============================================================================
+-- 9. Table 17: student_memories (Persistent Student Learning Insights)
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS public.student_memories (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    student_id UUID NOT NULL REFERENCES public.students(id) ON DELETE CASCADE,
+    memory_key TEXT NOT NULL,
+    content TEXT NOT NULL,
+    source TEXT NOT NULL DEFAULT 'assistant' CHECK (source IN ('assistant', 'quiz', 'manual')),
+    created_at TIMESTAMPTZ DEFAULT now(),
+    updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_student_memories_student ON public.student_memories(student_id, created_at DESC);
+ALTER TABLE public.student_memories ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Students can access own memories"
+    ON public.student_memories FOR ALL
+    USING (auth.uid() = student_id)
+    WITH CHECK (auth.uid() = student_id);
+
+-- ============================================================================
+-- 10. Table 18: chat_messages (AI Study Assistant persistent memory)
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS public.chat_messages (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     student_id UUID NOT NULL REFERENCES public.students(id) ON DELETE CASCADE,
+    conversation_id UUID REFERENCES public.conversations(id) ON DELETE CASCADE,
     role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
     content TEXT NOT NULL,
     citations JSONB NOT NULL DEFAULT '[]'::jsonb,
@@ -508,6 +548,7 @@ CREATE TABLE IF NOT EXISTS public.chat_messages (
 );
 
 CREATE INDEX IF NOT EXISTS idx_chat_messages_student_time ON public.chat_messages(student_id, created_at ASC);
+CREATE INDEX IF NOT EXISTS idx_chat_messages_conv ON public.chat_messages(student_id, conversation_id, created_at ASC);
 
 ALTER TABLE public.chat_messages ENABLE ROW LEVEL SECURITY;
 

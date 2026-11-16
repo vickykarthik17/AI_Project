@@ -327,9 +327,29 @@ export type StudyAssistantIntent =
   | 'test_weak_areas'
   | 'general';
 
+export interface Conversation {
+  id: string;
+  userId: string;
+  title: string;
+  subject: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface StudentMemory {
+  id: string;
+  userId: string;
+  key: string;
+  content: string;
+  source: 'assistant' | 'quiz' | 'manual';
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface ChatMessage {
   id: string;
   userId?: string;
+  conversationId?: string;
   role: 'user' | 'assistant';
   content: string;
   citations: Citation[];

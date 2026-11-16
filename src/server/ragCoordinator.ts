@@ -16,6 +16,8 @@ export interface RunGroundedRagParams {
   topics?: string[];
   documentId?: string;
   weakestTopic?: string;
+  conversationHistory?: Array<{ role: 'user' | 'assistant'; content: string }>;
+  studentMemories?: string[];
   token?: string;
 }
 
@@ -141,11 +143,17 @@ export const ragCoordinator = {
     }));
 
     // 2. Stream with Vercel AI SDK
+    const memoryGuidance = params.studentMemories && params.studentMemories.length > 0
+      ? `Student Verified Learning Insights & Profile:\n${params.studentMemories.map((m) => `- ${m}`).join('\n')}`
+      : undefined;
+
     const stream = await createGroundedChatStream({
       query,
       retrievedChunks: retrievalResult.chunks,
       subject,
       weakestTopic,
+      intentInstructions: memoryGuidance,
+      conversationHistory: params.conversationHistory,
     });
 
     await pipeGroundedStreamToResponse(stream, res, citations, {

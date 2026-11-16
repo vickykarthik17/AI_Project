@@ -1,9 +1,11 @@
 import {
   ChatMessage,
+  Conversation,
   DiagnosticQuiz,
   DocumentChunk,
   PastPaperQuestion,
   RevisionPlan,
+  StudentMemory,
   StudyMaterial,
   TopicGapDiagnosis,
   TopicNode,
@@ -307,14 +309,47 @@ export const repo = {
   },
 
   // ============================================================================
+  // Conversations & Multi-turn History (Student Scoped)
+  // ============================================================================
+  async getConversations(userId: string, token?: string): Promise<Conversation[]> {
+    if (isSupabaseConfigured()) {
+      const convs = await supabaseDbRepo.getConversations(userId, token);
+      if (convs.length > 0) return convs;
+    }
+    return dbRepo.getConversations(userId);
+  },
+
+  async createConversation(userId: string, title: string, subject: string = 'Biology', token?: string): Promise<Conversation> {
+    if (isSupabaseConfigured()) {
+      return supabaseDbRepo.createConversation(userId, title, subject, token);
+    }
+    return dbRepo.createConversation(userId, title, subject);
+  },
+
+  async updateConversation(id: string, userId: string, title: string, token?: string): Promise<Conversation | null> {
+    if (isSupabaseConfigured()) {
+      const res = await supabaseDbRepo.updateConversation(id, userId, title, token);
+      if (res) return res;
+    }
+    return dbRepo.updateConversation(id, userId, title);
+  },
+
+  async deleteConversation(id: string, userId: string, token?: string): Promise<boolean> {
+    if (isSupabaseConfigured()) {
+      await supabaseDbRepo.deleteConversation(id, userId, token);
+    }
+    return dbRepo.deleteConversation(id, userId);
+  },
+
+  // ============================================================================
   // AI Study Assistant Conversation Memory (Student Scoped)
   // ============================================================================
-  async getChatMessages(userId: string, token?: string): Promise<ChatMessage[]> {
+  async getChatMessages(userId: string, conversationId?: string, token?: string): Promise<ChatMessage[]> {
     if (isSupabaseConfigured()) {
-      const msgs = await supabaseDbRepo.getChatMessages(userId, token);
+      const msgs = await supabaseDbRepo.getChatMessages(userId, conversationId, token);
       if (msgs.length > 0) return msgs;
     }
-    return dbRepo.getChatMessages(userId);
+    return dbRepo.getChatMessages(userId, conversationId);
   },
 
   async saveChatMessage(message: ChatMessage, userId: string, token?: string): Promise<void> {
@@ -324,10 +359,39 @@ export const repo = {
     dbRepo.saveChatMessage(userId, message);
   },
 
-  async clearChatMessages(userId: string, token?: string): Promise<void> {
+  async clearChatMessages(userId: string, conversationId?: string, token?: string): Promise<void> {
     if (isSupabaseConfigured()) {
-      await supabaseDbRepo.clearChatMessages(userId, token);
+      await supabaseDbRepo.clearChatMessages(userId, conversationId, token);
     }
-    dbRepo.clearChatMessages(userId);
+    dbRepo.clearChatMessages(userId, conversationId);
+  },
+
+  // ============================================================================
+  // Student Learning Memories (Student Scoped)
+  // ============================================================================
+  async getStudentMemories(userId: string, token?: string): Promise<StudentMemory[]> {
+    if (isSupabaseConfigured()) {
+      const mems = await supabaseDbRepo.getStudentMemories(userId, token);
+      if (mems.length > 0) return mems;
+    }
+    return dbRepo.getStudentMemories(userId);
+  },
+
+  async saveStudentMemory(
+    userId: string,
+    memory: Partial<StudentMemory> & { content: string; key?: string },
+    token?: string
+  ): Promise<StudentMemory> {
+    if (isSupabaseConfigured()) {
+      await supabaseDbRepo.saveStudentMemory(userId, memory, token);
+    }
+    return dbRepo.saveStudentMemory(userId, memory);
+  },
+
+  async deleteStudentMemory(id: string, userId: string, token?: string): Promise<boolean> {
+    if (isSupabaseConfigured()) {
+      await supabaseDbRepo.deleteStudentMemory(id, userId, token);
+    }
+    return dbRepo.deleteStudentMemory(id, userId);
   },
 };

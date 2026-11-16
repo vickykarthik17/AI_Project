@@ -690,7 +690,7 @@ export async function createExpressApp() {
   router.post('/rag/ask', requireAuth, async (req: AuthedRequest, res: Response) => {
     try {
       const userId = req.user!.id;
-      const { query, subject, topics, documentId } = req.body || {};
+      const { query, subject, topics, documentId, conversationId } = req.body || {};
       if (!query || !String(query).trim()) {
         res.status(400).json({ error: 'Please enter a question for the AI Study Assistant.' });
         return;
@@ -699,6 +699,19 @@ export async function createExpressApp() {
       const gaps = await repo.getGapDiagnoses(userId, subject, req.token);
       const weakestTopic = gaps.find((g) => g.status === 'Weak')?.topicName || gaps[0]?.topicName;
 
+      // Multi-turn context & student learning memory
+      let conversationHistory: Array<{ role: 'user' | 'assistant'; content: string }> | undefined;
+      if (conversationId) {
+        const pastMsgs = await repo.getChatMessages(userId, conversationId, req.token);
+        conversationHistory = pastMsgs.slice(-6).map((m) => ({
+          role: m.role,
+          content: m.content,
+        }));
+      }
+
+      const memories = await repo.getStudentMemories(userId, req.token);
+      const studentMemories = memories.map((m) => `${m.key}: ${m.content}`);
+
       const result = await ragCoordinator.runGroundedRag({
         query: String(query),
         studentId: userId,
@@ -706,8 +719,45 @@ export async function createExpressApp() {
         topics: Array.isArray(topics) ? topics : undefined,
         documentId,
         weakestTopic,
+        conversationHistory,
+        studentMemories,
         token: req.token,
       });
+
+      // Persist messages if conversationId is provided
+      if (conversationId) {
+        await repo.saveChatMessage(
+          {
+            id: `msg_user_${Date.now()}`,
+            userId,
+            conversationId,
+            role: 'user',
+            content: String(query),
+            citations: [],
+            grounded: true,
+            createdAt: new Date().toISOString(),
+          },
+          userId,
+          req.token
+        );
+
+        await repo.saveChatMessage(
+          {
+            id: `msg_asst_${Date.now() + 1}`,
+            userId,
+            conversationId,
+            role: 'assistant',
+            content: result.answer,
+            citations: result.citations,
+            grounded: result.grounded,
+            insufficientEvidence: result.insufficientEvidence,
+            debugTelemetry: result.debugTelemetry,
+            createdAt: new Date().toISOString(),
+          },
+          userId,
+          req.token
+        );
+      }
 
       res.json(result);
     } catch (err: any) {
@@ -718,7 +768,7 @@ export async function createExpressApp() {
   router.post('/rag/stream', requireAuth, async (req: AuthedRequest, res: Response) => {
     try {
       const userId = req.user!.id;
-      const { query, subject, topics, documentId } = req.body || {};
+      const { query, subject, topics, documentId, conversationId } = req.body || {};
       if (!query || !String(query).trim()) {
         res.status(400).json({ error: 'Please enter a question for the AI Study Assistant.' });
         return;
@@ -727,6 +777,35 @@ export async function createExpressApp() {
       const gaps = await repo.getGapDiagnoses(userId, subject, req.token);
       const weakestTopic = gaps.find((g) => g.status === 'Weak')?.topicName || gaps[0]?.topicName;
 
+      // Multi-turn context & student learning memory
+      let conversationHistory: Array<{ role: 'user' | 'assistant'; content: string }> | undefined;
+      if (conversationId) {
+        const pastMsgs = await repo.getChatMessages(userId, conversationId, req.token);
+        conversationHistory = pastMsgs.slice(-6).map((m) => ({
+          role: m.role,
+          content: m.content,
+        }));
+
+        // Persist user prompt immediately
+        await repo.saveChatMessage(
+          {
+            id: `msg_user_${Date.now()}`,
+            userId,
+            conversationId,
+            role: 'user',
+            content: String(query),
+            citations: [],
+            grounded: true,
+            createdAt: new Date().toISOString(),
+          },
+          userId,
+          req.token
+        );
+      }
+
+      const memories = await repo.getStudentMemories(userId, req.token);
+      const studentMemories = memories.map((m) => `${m.key}: ${m.content}`);
+
       await ragCoordinator.streamGroundedRag({
         query: String(query),
         studentId: userId,
@@ -734,6 +813,8 @@ export async function createExpressApp() {
         topics: Array.isArray(topics) ? topics : undefined,
         documentId,
         weakestTopic,
+        conversationHistory,
+        studentMemories,
         token: req.token,
         res,
       });
@@ -756,6 +837,158 @@ export async function createExpressApp() {
         description: (tools as any)[name].description,
       })),
     });
+  });
+
+  // ============================================================================
+  // CONVERSATION & STUDENT LEARNING MEMORY ENDPOINTS
+  // ============================================================================
+  router.get('/chat/conversations', requireAuth, async (req: AuthedRequest, res: Response) => {
+    try {
+      const userId = req.user!.id;
+      let convs = await repo.getConversations(userId, req.token);
+      if (convs.length === 0) {
+        const def = await repo.createConversation(userId, 'General Biology Study & Revision', 'Biology', req.token);
+        convs = [def];
+      }
+      res.json({ conversations: convs });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Failed to fetch conversations.' });
+    }
+  });
+
+  router.post('/chat/conversations', requireAuth, async (req: AuthedRequest, res: Response) => {
+    try {
+      const userId = req.user!.id;
+      const { title = 'New Study Session', subject = 'Biology' } = req.body || {};
+      const conv = await repo.createConversation(userId, String(title).trim(), String(subject).trim(), req.token);
+      res.status(201).json({ conversation: conv });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Failed to create conversation.' });
+    }
+  });
+
+  router.patch('/chat/conversations/:id', requireAuth, async (req: AuthedRequest, res: Response) => {
+    try {
+      const userId = req.user!.id;
+      const { title } = req.body || {};
+      if (!title || !String(title).trim()) {
+        res.status(400).json({ error: 'Conversation title cannot be empty.' });
+        return;
+      }
+      const updated = await repo.updateConversation(req.params.id, userId, String(title).trim(), req.token);
+      if (!updated) {
+        res.status(404).json({ error: 'Conversation not found.' });
+        return;
+      }
+      res.json({ conversation: updated });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Failed to update conversation.' });
+    }
+  });
+
+  router.delete('/chat/conversations/:id', requireAuth, async (req: AuthedRequest, res: Response) => {
+    try {
+      const userId = req.user!.id;
+      const deleted = await repo.deleteConversation(req.params.id, userId, req.token);
+      res.json({ success: deleted });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Failed to delete conversation.' });
+    }
+  });
+
+  router.get('/chat/messages', requireAuth, async (req: AuthedRequest, res: Response) => {
+    try {
+      const userId = req.user!.id;
+      const conversationId = req.query.conversationId as string | undefined;
+      const messages = await repo.getChatMessages(userId, conversationId, req.token);
+      res.json({ messages });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Failed to fetch messages.' });
+    }
+  });
+
+  router.post('/chat/messages', requireAuth, async (req: AuthedRequest, res: Response) => {
+    try {
+      const userId = req.user!.id;
+      const { message } = req.body || {};
+      if (!message || !message.content) {
+        res.status(400).json({ error: 'Valid chat message object is required.' });
+        return;
+      }
+      await repo.saveChatMessage(
+        {
+          id: message.id || `msg_${Date.now()}`,
+          userId,
+          conversationId: message.conversationId,
+          role: message.role || 'assistant',
+          content: message.content,
+          citations: message.citations || [],
+          grounded: message.grounded !== false,
+          intent: message.intent,
+          debugTelemetry: message.debugTelemetry,
+          createdAt: message.createdAt || new Date().toISOString(),
+        },
+        userId,
+        req.token
+      );
+      res.status(201).json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Failed to save message.' });
+    }
+  });
+
+  router.delete('/chat/messages', requireAuth, async (req: AuthedRequest, res: Response) => {
+    try {
+      const userId = req.user!.id;
+      const conversationId = req.query.conversationId as string | undefined;
+      await repo.clearChatMessages(userId, conversationId, req.token);
+      res.json({ success: true, message: 'Chat messages cleared successfully.' });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Failed to clear chat messages.' });
+    }
+  });
+
+  router.get('/students/memories', requireAuth, async (req: AuthedRequest, res: Response) => {
+    try {
+      const userId = req.user!.id;
+      const memories = await repo.getStudentMemories(userId, req.token);
+      res.json({ memories });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Failed to fetch student learning memories.' });
+    }
+  });
+
+  router.post('/students/memories', requireAuth, async (req: AuthedRequest, res: Response) => {
+    try {
+      const userId = req.user!.id;
+      const { content, key = 'learning_insight', source = 'manual' } = req.body || {};
+      if (!content || !String(content).trim()) {
+        res.status(400).json({ error: 'Memory content cannot be empty.' });
+        return;
+      }
+      const saved = await repo.saveStudentMemory(
+        userId,
+        {
+          key: String(key).trim(),
+          content: String(content).trim(),
+          source: source as 'assistant' | 'quiz' | 'manual',
+        },
+        req.token
+      );
+      res.status(201).json({ memory: saved });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Failed to save student memory.' });
+    }
+  });
+
+  router.delete('/students/memories/:id', requireAuth, async (req: AuthedRequest, res: Response) => {
+    try {
+      const userId = req.user!.id;
+      const deleted = await repo.deleteStudentMemory(req.params.id, userId, req.token);
+      res.json({ success: deleted });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Failed to delete student memory.' });
+    }
   });
 
   router.post('/rag/inspect', requireAuth, async (req: AuthedRequest, res: Response) => {

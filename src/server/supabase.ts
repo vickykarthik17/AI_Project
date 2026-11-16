@@ -2,6 +2,7 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import crypto from 'node:crypto';
 import {
   ChatMessage,
+  Conversation,
   DiagnosticQuiz,
   DocumentChunk,
   PastPaperQuestion,
@@ -9,6 +10,7 @@ import {
   QuizSubmissionAnswer,
   RevisionPlan,
   RevisionTask,
+  StudentMemory,
   StudyMaterial,
   TopicGapDiagnosis,
   TopicNode,
@@ -1193,23 +1195,113 @@ export const supabaseDbRepo = {
     return data || [];
   },
 
-  // 10. AI Study Assistant Chat Memory
-  async getChatMessages(userId: string, token?: string): Promise<ChatMessage[]> {
+  // 10. Conversations & Multi-turn History (Supabase)
+  async getConversations(userId: string, token?: string): Promise<Conversation[]> {
     const client = (token ? getUserScopedSupabaseClient(token) : null) || getSupabaseAdmin();
     if (!client) return [];
 
     const studentUuid = toUuid(userId);
     const { data, error } = await client
-      .from('chat_messages')
+      .from('conversations')
       .select('*')
       .eq('student_id', studentUuid)
-      .order('created_at', { ascending: true });
+      .order('updated_at', { ascending: false });
 
+    if (error || !data) return [];
+    return data.map((r: any) => ({
+      id: r.id,
+      userId: r.student_id,
+      title: sanitizeDashes(r.title),
+      subject: sanitizeDashes(r.subject || 'Biology'),
+      createdAt: r.created_at,
+      updatedAt: r.updated_at,
+    }));
+  },
+
+  async createConversation(userId: string, title: string, subject: string = 'Biology', token?: string): Promise<Conversation> {
+    const client = (token ? getUserScopedSupabaseClient(token) : null) || getSupabaseAdmin();
+    const id = crypto.randomUUID();
+    const studentUuid = toUuid(userId);
+    const now = new Date().toISOString();
+
+    if (client) {
+      await client.from('conversations').insert({
+        id,
+        student_id: studentUuid,
+        title: sanitizeDashes(title),
+        subject: sanitizeDashes(subject),
+        created_at: now,
+        updated_at: now,
+      });
+    }
+
+    return {
+      id,
+      userId,
+      title: sanitizeDashes(title),
+      subject: sanitizeDashes(subject),
+      createdAt: now,
+      updatedAt: now,
+    };
+  },
+
+  async updateConversation(id: string, userId: string, title: string, token?: string): Promise<Conversation | null> {
+    const client = (token ? getUserScopedSupabaseClient(token) : null) || getSupabaseAdmin();
+    if (!client) return null;
+
+    const studentUuid = toUuid(userId);
+    const now = new Date().toISOString();
+    const { data, error } = await client
+      .from('conversations')
+      .update({ title: sanitizeDashes(title), updated_at: now })
+      .eq('id', id)
+      .eq('student_id', studentUuid)
+      .select()
+      .single();
+
+    if (error || !data) return null;
+    return {
+      id: data.id,
+      userId: data.student_id,
+      title: sanitizeDashes(data.title),
+      subject: sanitizeDashes(data.subject || 'Biology'),
+      createdAt: data.created_at,
+      updatedAt: data.updated_at,
+    };
+  },
+
+  async deleteConversation(id: string, userId: string, token?: string): Promise<boolean> {
+    const client = (token ? getUserScopedSupabaseClient(token) : null) || getSupabaseAdmin();
+    if (!client) return false;
+
+    const studentUuid = toUuid(userId);
+    await client.from('chat_messages').delete().eq('conversation_id', id).eq('student_id', studentUuid);
+    const { error } = await client.from('conversations').delete().eq('id', id).eq('student_id', studentUuid);
+    return !error;
+  },
+
+  // 11. AI Study Assistant Chat Memory
+  async getChatMessages(userId: string, conversationId?: string, token?: string): Promise<ChatMessage[]> {
+    const client = (token ? getUserScopedSupabaseClient(token) : null) || getSupabaseAdmin();
+    if (!client) return [];
+
+    const studentUuid = toUuid(userId);
+    let query = client
+      .from('chat_messages')
+      .select('*')
+      .eq('student_id', studentUuid);
+
+    if (conversationId) {
+      query = query.eq('conversation_id', conversationId);
+    }
+
+    const { data, error } = await query.order('created_at', { ascending: true });
     if (error || !data) return [];
 
     return data.map((r: any) => ({
       id: r.id,
       userId: r.student_id,
+      conversationId: r.conversation_id || undefined,
       role: r.role as 'user' | 'assistant',
       content: sanitizeDashes(r.content),
       citations: Array.isArray(r.citations) ? r.citations : JSON.parse(r.citations || '[]'),
@@ -1228,6 +1320,7 @@ export const supabaseDbRepo = {
     await client.from('chat_messages').upsert({
       id: toUuid(message.id),
       student_id: studentUuid,
+      conversation_id: message.conversationId || null,
       role: message.role,
       content: sanitizeDashes(message.content),
       citations: message.citations || [],
@@ -1238,12 +1331,84 @@ export const supabaseDbRepo = {
     });
   },
 
-  async clearChatMessages(userId: string, token?: string): Promise<void> {
+  async clearChatMessages(userId: string, conversationId?: string, token?: string): Promise<void> {
     const client = (token ? getUserScopedSupabaseClient(token) : null) || getSupabaseAdmin();
     if (!client) return;
 
     const studentUuid = toUuid(userId);
-    await client.from('chat_messages').delete().eq('student_id', studentUuid);
+    let query = client.from('chat_messages').delete().eq('student_id', studentUuid);
+    if (conversationId) {
+      query = query.eq('conversation_id', conversationId);
+    }
+    await query;
+  },
+
+  // 12. Student Learning Memories
+  async getStudentMemories(userId: string, token?: string): Promise<StudentMemory[]> {
+    const client = (token ? getUserScopedSupabaseClient(token) : null) || getSupabaseAdmin();
+    if (!client) return [];
+
+    const studentUuid = toUuid(userId);
+    const { data, error } = await client
+      .from('student_memories')
+      .select('*')
+      .eq('student_id', studentUuid)
+      .order('created_at', { ascending: false });
+
+    if (error || !data) return [];
+    return data.map((r: any) => ({
+      id: r.id,
+      userId: r.student_id,
+      key: sanitizeDashes(r.memory_key),
+      content: sanitizeDashes(r.content),
+      source: (r.source || 'assistant') as 'assistant' | 'quiz' | 'manual',
+      createdAt: r.created_at,
+      updatedAt: r.updated_at,
+    }));
+  },
+
+  async saveStudentMemory(
+    userId: string,
+    memory: Partial<StudentMemory> & { content: string; key?: string },
+    token?: string
+  ): Promise<StudentMemory> {
+    const client = (token ? getUserScopedSupabaseClient(token) : null) || getSupabaseAdmin();
+    const id = memory.id ? toUuid(memory.id) : crypto.randomUUID();
+    const studentUuid = toUuid(userId);
+    const key = memory.key || 'learning_insight';
+    const source = memory.source || 'assistant';
+    const now = new Date().toISOString();
+
+    if (client) {
+      await client.from('student_memories').upsert({
+        id,
+        student_id: studentUuid,
+        memory_key: sanitizeDashes(key),
+        content: sanitizeDashes(memory.content),
+        source,
+        created_at: now,
+        updated_at: now,
+      });
+    }
+
+    return {
+      id,
+      userId,
+      key: sanitizeDashes(key),
+      content: sanitizeDashes(memory.content),
+      source: source as 'assistant' | 'quiz' | 'manual',
+      createdAt: now,
+      updatedAt: now,
+    };
+  },
+
+  async deleteStudentMemory(id: string, userId: string, token?: string): Promise<boolean> {
+    const client = (token ? getUserScopedSupabaseClient(token) : null) || getSupabaseAdmin();
+    if (!client) return false;
+
+    const studentUuid = toUuid(userId);
+    const { error } = await client.from('student_memories').delete().eq('id', id).eq('student_id', studentUuid);
+    return !error;
   },
 };
 

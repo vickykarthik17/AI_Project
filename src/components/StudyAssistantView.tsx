@@ -2,57 +2,81 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   AlertTriangle,
   BookOpen,
+  Brain,
   CheckCircle2,
   ChevronDown,
   ChevronUp,
   Cpu,
   Database,
+  Edit3,
   ExternalLink,
   FileCode,
   Fingerprint,
+  History,
   Layers,
   Loader2,
+  MessageSquare,
+  Plus,
+  Save,
   Send,
   ShieldAlert,
   ShieldCheck,
   Sparkles,
   Square,
   Terminal,
+  Trash2,
+  X,
 } from 'lucide-react';
 import { apiRequest } from '../api';
-import { ChatMessage, Citation, RagInspectionTelemetry } from '../types';
+import {
+  ChatMessage,
+  Citation,
+  Conversation,
+  RagInspectionTelemetry,
+  StudentMemory,
+} from '../types';
 
 interface StudyAssistantViewProps {
   initialTopicContext?: string;
   onInspectCitation: (citation: Citation) => void;
 }
 
+const DEFAULT_WELCOME_MSG: ChatMessage = {
+  id: 'welcome_msg',
+  role: 'assistant',
+  content:
+    'Welcome to the GapFinder AI Grounded Study Assistant. I answer strictly using passages retrieved from your uploaded textbooks, syllabus, and past examination papers. Select a contextual diagnostic action below or ask a question about your study materials.',
+  citations: [
+    {
+      chunkId: 'chunk_bio_05',
+      documentName: 'Biology_Textbook.pdf',
+      chapter: 'Chapter 3: Photosynthesis',
+      pageNumber: 42,
+      section: 'Light-Dependent Reactions in the Thylakoid',
+      excerpt:
+        'Light-dependent reactions take place strictly within the thylakoid membrane of chloroplasts. Photon absorption excites electrons in Photosystem II (P680), triggering photolysis of water.',
+      similarityScore: 0.9124,
+    },
+  ],
+  grounded: true,
+  createdAt: new Date().toISOString(),
+};
+
 export const StudyAssistantView: React.FC<StudyAssistantViewProps> = ({
   initialTopicContext,
   onInspectCitation,
 }) => {
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      id: 'welcome_msg',
-      role: 'assistant',
-      content:
-        'Welcome to the GapFinder AI Grounded Study Assistant. I answer strictly using passages retrieved from your uploaded textbooks, syllabus, and past examination papers. Select a contextual diagnostic action below or ask a question about your study materials.',
-      citations: [
-        {
-          chunkId: 'chunk_bio_05',
-          documentName: 'Biology_Textbook.pdf',
-          chapter: 'Chapter 3: Photosynthesis',
-          pageNumber: 42,
-          section: 'Light-Dependent Reactions in the Thylakoid',
-          excerpt:
-            'Light-dependent reactions take place strictly within the thylakoid membrane of chloroplasts. Photon absorption excites electrons in Photosystem II (P680), triggering photolysis of water.',
-          similarityScore: 0.9124,
-        },
-      ],
-      grounded: true,
-      createdAt: new Date().toISOString(),
-    },
-  ]);
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
+  const [editingConvId, setEditingConvId] = useState<string | null>(null);
+  const [editTitleInput, setEditTitleInput] = useState('');
+  const [studentMemories, setStudentMemories] = useState<StudentMemory[]>([]);
+  const [showMemoryModal, setShowMemoryModal] = useState(false);
+  const [newMemoryKey, setNewMemoryKey] = useState('struggling_concept');
+  const [newMemoryContent, setNewMemoryContent] = useState('');
+  const [savingMemory, setSavingMemory] = useState(false);
+
+  const [messages, setMessages] = useState<ChatMessage[]>([DEFAULT_WELCOME_MSG]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [showInspectionPanel, setShowInspectionPanel] = useState(false);
@@ -61,6 +85,144 @@ export const StudyAssistantView: React.FC<StudyAssistantViewProps> = ({
     'chunks' | 'context' | 'groq' | 'citations' | 'embedding'
   >('chunks');
   const abortControllerRef = useRef<AbortController | null>(null);
+
+  // Load conversations and student memories on mount
+  useEffect(() => {
+    loadConversations();
+    loadStudentMemories();
+  }, []);
+
+  const loadConversations = async () => {
+    try {
+      const res = await apiRequest<{ conversations: Conversation[] }>('/chat/conversations');
+      if (res.conversations && res.conversations.length > 0) {
+        setConversations(res.conversations);
+        const firstId = res.conversations[0].id;
+        setActiveConversationId(firstId);
+        loadMessagesForConversation(firstId);
+      }
+    } catch (err) {
+      console.error('Failed to load conversations', err);
+    }
+  };
+
+  const loadMessagesForConversation = async (convId: string) => {
+    try {
+      const res = await apiRequest<{ messages: ChatMessage[] }>(`/chat/messages?conversationId=${convId}`);
+      if (res.messages && res.messages.length > 0) {
+        setMessages(res.messages);
+      } else {
+        setMessages([DEFAULT_WELCOME_MSG]);
+      }
+    } catch {
+      setMessages([DEFAULT_WELCOME_MSG]);
+    }
+  };
+
+  const loadStudentMemories = async () => {
+    try {
+      const res = await apiRequest<{ memories: StudentMemory[] }>('/students/memories');
+      setStudentMemories(res.memories || []);
+    } catch (err) {
+      console.error('Failed to load student memories', err);
+    }
+  };
+
+  const selectConversation = (convId: string) => {
+    if (convId === activeConversationId) return;
+    setActiveConversationId(convId);
+    loadMessagesForConversation(convId);
+  };
+
+  const handleCreateConversation = async () => {
+    try {
+      const title = `Biology Study Session ${conversations.length + 1}`;
+      const res = await apiRequest<{ conversation: Conversation }>('/chat/conversations', {
+        method: 'POST',
+        body: JSON.stringify({ title, subject: 'Biology' }),
+      });
+      setConversations((prev) => [res.conversation, ...prev]);
+      setActiveConversationId(res.conversation.id);
+      setMessages([DEFAULT_WELCOME_MSG]);
+    } catch (err) {
+      console.error('Failed to create conversation', err);
+    }
+  };
+
+  const handleRenameConversation = async (convId: string) => {
+    if (!editTitleInput.trim()) {
+      setEditingConvId(null);
+      return;
+    }
+    try {
+      const res = await apiRequest<{ conversation: Conversation }>(`/chat/conversations/${convId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ title: editTitleInput.trim() }),
+      });
+      setConversations((prev) => prev.map((c) => (c.id === convId ? res.conversation : c)));
+      setEditingConvId(null);
+    } catch (err) {
+      console.error('Failed to rename conversation', err);
+    }
+  };
+
+  const handleDeleteConversation = async (convId: string) => {
+    if (!window.confirm('Delete this conversation session and all its messages?')) return;
+    try {
+      await apiRequest(`/chat/conversations/${convId}`, { method: 'DELETE' });
+      const remaining = conversations.filter((c) => c.id !== convId);
+      setConversations(remaining);
+      if (remaining.length > 0) {
+        selectConversation(remaining[0].id);
+      } else {
+        handleCreateConversation();
+      }
+    } catch (err) {
+      console.error('Failed to delete conversation', err);
+    }
+  };
+
+  const handleClearMessages = async () => {
+    if (!activeConversationId) return;
+    if (!window.confirm('Clear all chat messages in this study session?')) return;
+    try {
+      await apiRequest(`/chat/messages?conversationId=${activeConversationId}`, { method: 'DELETE' });
+      setMessages([DEFAULT_WELCOME_MSG]);
+    } catch (err) {
+      console.error('Failed to clear messages', err);
+    }
+  };
+
+  const handleAddStudentMemory = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newMemoryContent.trim()) return;
+    setSavingMemory(true);
+    try {
+      const res = await apiRequest<{ memory: StudentMemory }>('/students/memories', {
+        method: 'POST',
+        body: JSON.stringify({
+          key: newMemoryKey,
+          content: newMemoryContent.trim(),
+          source: 'manual',
+        }),
+      });
+      setStudentMemories((prev) => [res.memory, ...prev]);
+      setNewMemoryContent('');
+    } catch (err) {
+      console.error('Failed to save student memory', err);
+    } finally {
+      setSavingMemory(false);
+    }
+  };
+
+  const handleDeleteStudentMemory = async (memId: string) => {
+    try {
+      await apiRequest(`/students/memories/${memId}`, { method: 'DELETE' });
+      setStudentMemories((prev) => prev.filter((m) => m.id !== memId));
+    } catch (err) {
+      console.error('Failed to delete student memory', err);
+    }
+  };
 
   const stopGeneration = () => {
     if (abortControllerRef.current) {
@@ -112,7 +274,11 @@ export const StudyAssistantView: React.FC<StudyAssistantViewProps> = ({
           'Content-Type': 'application/json',
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
-        body: JSON.stringify({ query: clean, subject: 'Biology' }),
+        body: JSON.stringify({
+          query: clean,
+          subject: 'Biology',
+          conversationId: activeConversationId || undefined,
+        }),
         signal: controller.signal,
       });
 
@@ -155,19 +321,28 @@ export const StudyAssistantView: React.FC<StudyAssistantViewProps> = ({
               if (data.telemetry) {
                 setInspectionData(data.telemetry);
               }
+              const finishedMsg: ChatMessage = {
+                id: asstMsgId,
+                conversationId: activeConversationId || undefined,
+                role: 'assistant',
+                content: accumulatedText,
+                citations: finalCitations,
+                grounded: isGrounded,
+                debugTelemetry: data.telemetry,
+                createdAt: new Date().toISOString(),
+              };
+
               setMessages((prev) =>
-                prev.map((m) =>
-                  m.id === asstMsgId
-                    ? {
-                        ...m,
-                        content: accumulatedText,
-                        citations: finalCitations,
-                        grounded: isGrounded,
-                        debugTelemetry: data.telemetry,
-                      }
-                    : m
-                )
+                prev.map((m) => (m.id === asstMsgId ? finishedMsg : m))
               );
+
+              // Persist assistant message in background
+              if (activeConversationId) {
+                apiRequest('/chat/messages', {
+                  method: 'POST',
+                  body: JSON.stringify({ message: finishedMsg }),
+                }).catch(() => {});
+              }
             } else if (data.type === 'error') {
               throw new Error(data.error);
             }
@@ -192,7 +367,11 @@ export const StudyAssistantView: React.FC<StudyAssistantViewProps> = ({
           debugTelemetry?: RagInspectionTelemetry;
         }>('/rag/ask', {
           method: 'POST',
-          body: JSON.stringify({ query: clean, subject: 'Biology' }),
+          body: JSON.stringify({
+            query: clean,
+            subject: 'Biology',
+            conversationId: activeConversationId || undefined,
+          }),
         });
 
         if (res.debugTelemetry) {
@@ -251,21 +430,98 @@ export const StudyAssistantView: React.FC<StudyAssistantViewProps> = ({
         {/* Left 8 Cols: Grounded RAG Conversation */}
         <div className="lg:col-span-8 rounded-xl border border-slate-200 bg-white flex flex-col h-[700px]">
           {/* Header */}
-          <div className="p-5 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <div className="text-xs font-semibold text-indigo-600 flex items-center gap-1.5">
-                <ShieldCheck className="h-4 w-4" />
+          <div className="p-4 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex-1 min-w-[200px]">
+              <div className="text-[11px] font-semibold text-indigo-600 flex items-center gap-1.5">
+                <ShieldCheck className="h-3.5 w-3.5" />
                 Supporting RAG Assistant · Strictly Grounded in Student Uploaded Material
               </div>
-              <h2 className="text-base font-bold text-slate-900 mt-0.5">
-                Source-Grounded AI Study Assistant
-              </h2>
+              {editingConvId ? (
+                <div className="flex items-center gap-1.5 mt-1">
+                  <input
+                    type="text"
+                    value={editTitleInput}
+                    onChange={(e) => setEditTitleInput(e.target.value)}
+                    className="rounded border border-indigo-300 px-2 py-0.5 text-xs font-bold text-slate-900 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    placeholder="Session Title"
+                    autoFocus
+                  />
+                  <button
+                    type="button"
+                    onClick={() => handleRenameConversation(editingConvId)}
+                    className="p-1 rounded bg-indigo-50 text-indigo-700 hover:bg-indigo-100 cursor-pointer"
+                    title="Save title"
+                  >
+                    <Save className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditingConvId(null)}
+                    className="p-1 rounded bg-slate-100 text-slate-600 hover:bg-slate-200 cursor-pointer"
+                    title="Cancel"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 mt-0.5">
+                  <h2 className="text-sm font-bold text-slate-900 truncate">
+                    {conversations.find((c) => c.id === activeConversationId)?.title ||
+                      'General Biology Study & Revision'}
+                  </h2>
+                  {activeConversationId && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const curr = conversations.find((c) => c.id === activeConversationId);
+                        setEditTitleInput(curr?.title || '');
+                        setEditingConvId(activeConversationId);
+                      }}
+                      className="text-slate-400 hover:text-indigo-600 p-0.5 cursor-pointer"
+                      title="Rename this conversation"
+                    >
+                      <Edit3 className="h-3 w-3" />
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
+
             <div className="flex items-center gap-2">
               <button
                 type="button"
+                onClick={handleCreateConversation}
+                className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 cursor-pointer"
+                title="Create a new study conversation"
+              >
+                <Plus className="h-3.5 w-3.5 text-indigo-600" />
+                <span>New Chat</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setShowMemoryModal(true)}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50/70 px-2.5 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-100 cursor-pointer"
+                title="View and manage student learning memories"
+              >
+                <Brain className="h-3.5 w-3.5 text-indigo-600" />
+                <span>Memory ({studentMemories.length})</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleClearMessages}
+                className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-600 hover:text-rose-600 hover:bg-rose-50 cursor-pointer"
+                title="Clear messages in this conversation"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                <span>Clear</span>
+              </button>
+
+              <button
+                type="button"
                 onClick={() => setShowInspectionPanel((prev) => !prev)}
-                className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors cursor-pointer border ${
+                className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors cursor-pointer border ${
                   showInspectionPanel
                     ? 'border-indigo-600 bg-indigo-50 text-indigo-700'
                     : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
@@ -273,7 +529,7 @@ export const StudyAssistantView: React.FC<StudyAssistantViewProps> = ({
                 title="Toggle developer retrieval inspection panel"
               >
                 <Terminal className="h-3.5 w-3.5 text-indigo-600" />
-                <span>Developer Inspection Panel</span>
+                <span className="hidden sm:inline">Telemetry</span>
                 {showInspectionPanel ? (
                   <ChevronUp className="h-3.5 w-3.5" />
                 ) : (
@@ -405,9 +661,97 @@ export const StudyAssistantView: React.FC<StudyAssistantViewProps> = ({
           </form>
         </div>
 
-        {/* Right 4 Cols: Contextual Diagnostic Actions & Grounding Verification */}
+        {/* Right 4 Cols: Sessions, Memory, Contextual Actions & Grounding Verification */}
         <div className="lg:col-span-4 space-y-5">
-          <div className="rounded-xl border border-slate-200 bg-white p-5 space-y-3">
+          {/* Saved Study Sessions */}
+          <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <MessageSquare className="h-4 w-4 text-indigo-600" />
+                <h3 className="text-sm font-bold text-slate-900">Study Sessions</h3>
+              </div>
+              <button
+                type="button"
+                onClick={handleCreateConversation}
+                className="inline-flex items-center gap-1 rounded bg-indigo-50 px-2 py-1 text-[11px] font-semibold text-indigo-700 hover:bg-indigo-100 cursor-pointer"
+              >
+                <Plus className="h-3 w-3" />
+                <span>New</span>
+              </button>
+            </div>
+            <div className="space-y-1.5 max-h-48 overflow-y-auto">
+              {conversations.map((conv) => (
+                <div
+                  key={conv.id}
+                  className={`flex items-center justify-between p-2 rounded-lg text-xs cursor-pointer transition-colors ${
+                    conv.id === activeConversationId
+                      ? 'bg-indigo-50/80 border border-indigo-200 text-indigo-900 font-semibold'
+                      : 'hover:bg-slate-50 border border-transparent text-slate-700'
+                  }`}
+                  onClick={() => selectConversation(conv.id)}
+                >
+                  <div className="flex items-center gap-2 truncate pr-2">
+                    <span className="truncate">{conv.title}</span>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDeleteConversation(conv.id);
+                      }}
+                      className="p-1 text-slate-400 hover:text-rose-600 rounded cursor-pointer"
+                      title="Delete session"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Student Learning Memories Card */}
+          <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Brain className="h-4 w-4 text-purple-600" />
+                <h3 className="text-sm font-bold text-slate-900">Student Learning Memory</h3>
+              </div>
+              <span className="text-[10px] font-semibold bg-purple-50 text-purple-700 border border-purple-200 px-1.5 py-0.5 rounded">
+                Isolated
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-500">
+              Personalized concept insights and preferences used by the AI assistant to tailor answers
+            </p>
+            <div className="space-y-2">
+              {studentMemories.slice(0, 3).map((mem) => (
+                <div
+                  key={mem.id}
+                  className="p-2 rounded-lg bg-slate-50 border border-slate-200 text-xs text-slate-800 space-y-0.5"
+                >
+                  <div className="flex items-center justify-between text-[10px] text-slate-400">
+                    <span className="font-semibold uppercase tracking-wider text-purple-700">
+                      {mem.key.replace(/_/g, ' ')}
+                    </span>
+                    <span>{new Date(mem.createdAt).toLocaleDateString()}</span>
+                  </div>
+                  <p className="line-clamp-2 text-[11px]">{mem.content}</p>
+                </div>
+              ))}
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowMemoryModal(true)}
+              className="w-full text-center rounded-lg border border-slate-200 bg-slate-50 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
+            >
+              Manage Learning Memories ({studentMemories.length})
+            </button>
+          </div>
+
+          {/* Contextual Diagnostic Actions */}
+          <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-3">
             <div className="flex items-center gap-2">
               <Sparkles className="h-4 w-4 text-indigo-600" />
               <h3 className="text-sm font-bold text-slate-900">Contextual Diagnostic Actions</h3>
@@ -453,7 +797,7 @@ export const StudyAssistantView: React.FC<StudyAssistantViewProps> = ({
           </div>
 
           {/* Source Grounding Verification Test */}
-          <div className="rounded-xl border border-slate-200 bg-white p-5 space-y-3">
+          <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-3">
             <h3 className="text-sm font-bold text-slate-900">
               Verify Strict Source Grounding (Scenario 6)
             </h3>
@@ -476,6 +820,110 @@ export const StudyAssistantView: React.FC<StudyAssistantViewProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Student Learning Memories Modal */}
+      {showMemoryModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-xl shadow-2xl border border-slate-200 max-w-lg w-full max-h-[85vh] flex flex-col overflow-hidden">
+            <div className="p-4 border-b border-slate-200 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Brain className="h-5 w-5 text-purple-600" />
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">Student Learning Memories</h3>
+                  <p className="text-[11px] text-slate-500">
+                    Stored strictly in your authenticated student profile
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowMemoryModal(false)}
+                className="text-slate-400 hover:text-slate-600 p-1 cursor-pointer"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="p-4 overflow-y-auto flex-1 space-y-4">
+              <form onSubmit={handleAddStudentMemory} className="p-3 bg-purple-50/50 rounded-lg border border-purple-100 space-y-2">
+                <h4 className="text-xs font-bold text-purple-900">Add New Learning Insight</h4>
+                <div className="flex gap-2">
+                  <select
+                    value={newMemoryKey}
+                    onChange={(e) => setNewMemoryKey(e.target.value)}
+                    className="text-xs rounded border border-purple-200 bg-white px-2 py-1 text-slate-700"
+                  >
+                    <option value="struggling_concept">Struggling Concept</option>
+                    <option value="mastered_topic">Mastered Topic</option>
+                    <option value="learning_preference">Learning Preference</option>
+                    <option value="exam_target">Exam Target</option>
+                  </select>
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={newMemoryContent}
+                    onChange={(e) => setNewMemoryContent(e.target.value)}
+                    placeholder="e.g. Confuses cyclic vs non-cyclic photophosphorylation"
+                    className="flex-1 text-xs rounded border border-purple-200 bg-white px-2.5 py-1.5 text-slate-800 focus:outline-none focus:ring-1 focus:ring-purple-500"
+                  />
+                  <button
+                    type="submit"
+                    disabled={savingMemory || !newMemoryContent.trim()}
+                    className="rounded bg-purple-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-purple-700 disabled:opacity-50 cursor-pointer"
+                  >
+                    Save
+                  </button>
+                </div>
+              </form>
+
+              <div className="space-y-2">
+                <h4 className="text-xs font-bold text-slate-700">Saved Insights ({studentMemories.length})</h4>
+                {studentMemories.length === 0 ? (
+                  <p className="text-xs text-slate-400 italic">No learning insights recorded yet.</p>
+                ) : (
+                  studentMemories.map((mem) => (
+                    <div
+                      key={mem.id}
+                      className="p-3 rounded-lg border border-slate-200 bg-white flex items-start justify-between gap-3"
+                    >
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-purple-700 bg-purple-50 px-2 py-0.5 rounded border border-purple-100">
+                            {mem.key.replace(/_/g, ' ')}
+                          </span>
+                          <span className="text-[10px] text-slate-400">
+                            Source: {mem.source}
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-800 leading-relaxed">{mem.content}</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteStudentMemory(mem.id)}
+                        className="text-slate-400 hover:text-rose-600 p-1 cursor-pointer shrink-0"
+                        title="Delete insight"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+            <div className="p-3 border-t border-slate-200 bg-slate-50 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setShowMemoryModal(false)}
+                className="rounded-lg bg-slate-900 px-4 py-2 text-xs font-semibold text-white hover:bg-slate-800 cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Developer-Only Retrieval Inspection Panel */}
       {showInspectionPanel && (

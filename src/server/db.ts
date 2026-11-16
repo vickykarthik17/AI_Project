@@ -4,11 +4,13 @@ import { createRequire } from 'node:module';
 import path from 'node:path';
 import {
   ChatMessage,
+  Conversation,
   DiagnosticQuiz,
   DocumentChunk,
   PastPaperQuestion,
   RevisionPlan,
   RevisionTask,
+  StudentMemory,
   StudyMaterial,
   TopicGapDiagnosis,
   TopicNode,
@@ -235,9 +237,31 @@ export function initDatabase(): void {
       created_at TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS conversations (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      subject TEXT NOT NULL DEFAULT 'Biology',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_conversations_user ON conversations(user_id, updated_at DESC);
+
+    CREATE TABLE IF NOT EXISTS student_memories (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      memory_key TEXT NOT NULL,
+      content TEXT NOT NULL,
+      source TEXT NOT NULL DEFAULT 'assistant',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_student_memories_user ON student_memories(user_id, created_at DESC);
+
     CREATE TABLE IF NOT EXISTS chat_messages (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
+      conversation_id TEXT,
       role TEXT NOT NULL,
       content TEXT NOT NULL,
       citations_json TEXT NOT NULL DEFAULT '[]',
@@ -257,6 +281,12 @@ export function initDatabase(): void {
   } catch {}
   try {
     sqlite.prepare('ALTER TABLE past_paper_questions ADD COLUMN validation_evidence TEXT').run();
+  } catch {}
+  try {
+    sqlite.prepare('ALTER TABLE chat_messages ADD COLUMN conversation_id TEXT').run();
+  } catch {}
+  try {
+    sqlite.prepare('CREATE INDEX IF NOT EXISTS idx_chat_messages_conversation ON chat_messages(user_id, conversation_id, created_at)').run();
   } catch {}
 
   seedDemoAccountIfNeeded();
@@ -467,6 +497,88 @@ export function seedDemoAccountIfNeeded(forceReset: boolean = false): void {
       JSON.stringify(SAMPLE_REVISION_PLAN.tasks),
       SAMPLE_REVISION_PLAN.isSample ? 1 : 0,
       SAMPLE_REVISION_PLAN.createdAt
+    );
+
+    // Seed Demo Conversation & Grounded Welcome Message
+    const demoConvId = 'conv_demo_bio_01';
+    sqlite
+      .prepare(
+        'INSERT OR REPLACE INTO conversations (id, user_id, title, subject, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)'
+      )
+      .run(
+        demoConvId,
+        DEMO_USER_ID,
+        'Cellular Energetics & Photosynthesis Review',
+        'Biology',
+        '2026-11-13T10:00:00Z',
+        '2026-11-13T10:15:00Z'
+      );
+
+    const insertChatMsg = sqlite.prepare(`
+      INSERT OR REPLACE INTO chat_messages
+      (id, user_id, conversation_id, role, content, citations_json, grounded, intent, debug_telemetry_json, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    insertChatMsg.run(
+      'msg_demo_01',
+      DEMO_USER_ID,
+      demoConvId,
+      'assistant',
+      'Welcome to GapFinder AI Grounded Study Assistant. I am ready to review your uploaded AP Biology materials. How can I assist your revision today?',
+      JSON.stringify([
+        {
+          chunkId: 'chunk_bio_05',
+          documentName: 'Biology_Textbook.pdf',
+          chapter: 'Chapter 3: Photosynthesis',
+          pageNumber: 42,
+          section: 'Light-Dependent Reactions in the Thylakoid',
+          excerpt:
+            'Light-dependent reactions take place strictly within the thylakoid membrane of chloroplasts. Photon absorption excites electrons in Photosystem II (P680), triggering photolysis of water.',
+          similarityScore: 0.9124,
+        },
+      ]),
+      1,
+      'general',
+      null,
+      '2026-11-13T10:00:00Z'
+    );
+
+    // Seed Demo Student Learning Memories
+    const insertMemory = sqlite.prepare(`
+      INSERT OR REPLACE INTO student_memories
+      (id, user_id, memory_key, content, source, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    insertMemory.run(
+      'mem_demo_01',
+      DEMO_USER_ID,
+      'struggling_concept',
+      'Confuses photolysis in PS II with cyclic photophosphorylation in PS I',
+      'quiz',
+      '2026-11-13T10:05:00Z',
+      '2026-11-13T10:05:00Z'
+    );
+
+    insertMemory.run(
+      'mem_demo_02',
+      DEMO_USER_ID,
+      'learning_preference',
+      'Prefers step-by-step chemical reaction pathways over abstract text descriptions',
+      'assistant',
+      '2026-11-13T10:10:00Z',
+      '2026-11-13T10:10:00Z'
+    );
+
+    insertMemory.run(
+      'mem_demo_03',
+      DEMO_USER_ID,
+      'mastered_topic',
+      'High confidence in Cell Membrane Structure and Fluid Mosaic Model',
+      'quiz',
+      '2026-11-13T10:12:00Z',
+      '2026-11-13T10:12:00Z'
     );
   });
 
@@ -1128,14 +1240,100 @@ export const dbRepo = {
     return null;
   },
 
-  getChatMessages(userId: string): ChatMessage[] {
+  // ============================================================================
+  // Conversations & Multi-turn History (Student Scoped)
+  // ============================================================================
+  getConversations(userId: string): Conversation[] {
     const rows = sqlite
-      .prepare('SELECT * FROM chat_messages WHERE user_id = ? ORDER BY created_at ASC')
+      .prepare('SELECT * FROM conversations WHERE user_id = ? ORDER BY updated_at DESC')
       .all(userId) as any[];
 
     return rows.map((r) => ({
       id: r.id,
       userId: r.user_id,
+      title: sanitizeDashes(r.title),
+      subject: sanitizeDashes(r.subject || 'Biology'),
+      createdAt: r.created_at,
+      updatedAt: r.updated_at,
+    }));
+  },
+
+  getConversationById(id: string, userId: string): Conversation | null {
+    const row = sqlite
+      .prepare('SELECT * FROM conversations WHERE id = ? AND user_id = ?')
+      .get(id, userId) as any;
+    if (!row) return null;
+
+    return {
+      id: row.id,
+      userId: row.user_id,
+      title: sanitizeDashes(row.title),
+      subject: sanitizeDashes(row.subject || 'Biology'),
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+  },
+
+  createConversation(userId: string, title: string, subject: string = 'Biology'): Conversation {
+    const id = `conv_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`;
+    const now = new Date().toISOString();
+    sqlite
+      .prepare(
+        'INSERT INTO conversations (id, user_id, title, subject, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)'
+      )
+      .run(id, userId, sanitizeDashes(title), sanitizeDashes(subject), now, now);
+
+    return {
+      id,
+      userId,
+      title: sanitizeDashes(title),
+      subject: sanitizeDashes(subject),
+      createdAt: now,
+      updatedAt: now,
+    };
+  },
+
+  updateConversation(id: string, userId: string, title: string): Conversation | null {
+    const now = new Date().toISOString();
+    const info = sqlite
+      .prepare('UPDATE conversations SET title = ?, updated_at = ? WHERE id = ? AND user_id = ?')
+      .run(sanitizeDashes(title), now, id, userId);
+
+    if (info.changes === 0) return null;
+    return this.getConversationById(id, userId);
+  },
+
+  deleteConversation(id: string, userId: string): boolean {
+    const info = sqlite
+      .prepare('DELETE FROM conversations WHERE id = ? AND user_id = ?')
+      .run(id, userId);
+    sqlite
+      .prepare('DELETE FROM chat_messages WHERE conversation_id = ? AND user_id = ?')
+      .run(id, userId);
+    return info.changes > 0;
+  },
+
+  // ============================================================================
+  // Chat Messages (Filtered by User & Conversation)
+  // ============================================================================
+  getChatMessages(userId: string, conversationId?: string): ChatMessage[] {
+    let rows: any[];
+    if (conversationId) {
+      rows = sqlite
+        .prepare(
+          'SELECT * FROM chat_messages WHERE user_id = ? AND conversation_id = ? ORDER BY created_at ASC'
+        )
+        .all(userId, conversationId) as any[];
+    } else {
+      rows = sqlite
+        .prepare('SELECT * FROM chat_messages WHERE user_id = ? ORDER BY created_at ASC')
+        .all(userId) as any[];
+    }
+
+    return rows.map((r) => ({
+      id: r.id,
+      userId: r.user_id,
+      conversationId: r.conversation_id || undefined,
       role: r.role as 'user' | 'assistant',
       content: sanitizeDashes(r.content),
       citations: JSON.parse(r.citations_json || '[]'),
@@ -1147,14 +1345,16 @@ export const dbRepo = {
   },
 
   saveChatMessage(userId: string, message: ChatMessage): void {
+    const convId = message.conversationId || null;
     sqlite
       .prepare(
-        `INSERT OR REPLACE INTO chat_messages (id, user_id, role, content, citations_json, grounded, intent, debug_telemetry_json, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT OR REPLACE INTO chat_messages (id, user_id, conversation_id, role, content, citations_json, grounded, intent, debug_telemetry_json, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         message.id,
         userId,
+        convId,
         message.role,
         sanitizeDashes(message.content),
         JSON.stringify(message.citations || []),
@@ -1163,9 +1363,74 @@ export const dbRepo = {
         message.debugTelemetry ? JSON.stringify(message.debugTelemetry) : null,
         message.createdAt || new Date().toISOString()
       );
+
+    if (convId) {
+      sqlite
+        .prepare('UPDATE conversations SET updated_at = ? WHERE id = ? AND user_id = ?')
+        .run(new Date().toISOString(), convId, userId);
+    }
   },
 
-  clearChatMessages(userId: string): void {
-    sqlite.prepare('DELETE FROM chat_messages WHERE user_id = ?').run(userId);
+  clearChatMessages(userId: string, conversationId?: string): void {
+    if (conversationId) {
+      sqlite
+        .prepare('DELETE FROM chat_messages WHERE user_id = ? AND conversation_id = ?')
+        .run(userId, conversationId);
+    } else {
+      sqlite.prepare('DELETE FROM chat_messages WHERE user_id = ?').run(userId);
+    }
+  },
+
+  // ============================================================================
+  // Student Learning Memories (Strictly Isolated to Student Profile)
+  // ============================================================================
+  getStudentMemories(userId: string): StudentMemory[] {
+    const rows = sqlite
+      .prepare('SELECT * FROM student_memories WHERE user_id = ? ORDER BY created_at DESC')
+      .all(userId) as any[];
+
+    return rows.map((r) => ({
+      id: r.id,
+      userId: r.user_id,
+      key: sanitizeDashes(r.memory_key),
+      content: sanitizeDashes(r.content),
+      source: (r.source || 'assistant') as 'assistant' | 'quiz' | 'manual',
+      createdAt: r.created_at,
+      updatedAt: r.updated_at,
+    }));
+  },
+
+  saveStudentMemory(
+    userId: string,
+    memory: Partial<StudentMemory> & { content: string; key?: string }
+  ): StudentMemory {
+    const id = memory.id || `mem_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`;
+    const key = memory.key || 'learning_insight';
+    const now = new Date().toISOString();
+    const source = memory.source || 'assistant';
+
+    sqlite
+      .prepare(
+        `INSERT OR REPLACE INTO student_memories (id, user_id, memory_key, content, source, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run(id, userId, sanitizeDashes(key), sanitizeDashes(memory.content), source, now, now);
+
+    return {
+      id,
+      userId,
+      key: sanitizeDashes(key),
+      content: sanitizeDashes(memory.content),
+      source: source as 'assistant' | 'quiz' | 'manual',
+      createdAt: now,
+      updatedAt: now,
+    };
+  },
+
+  deleteStudentMemory(id: string, userId: string): boolean {
+    const info = sqlite
+      .prepare('DELETE FROM student_memories WHERE id = ? AND user_id = ?')
+      .run(id, userId);
+    return info.changes > 0;
   },
 };
