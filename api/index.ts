@@ -1,8 +1,9 @@
+import { createExpressApp } from '../server';
+
 let cachedApp: any = null;
 
 async function getApp() {
   if (!cachedApp) {
-    const { createExpressApp } = await import('../server');
     cachedApp = await createExpressApp();
   }
   return cachedApp;
